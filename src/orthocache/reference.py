@@ -58,6 +58,43 @@ def compute_block_energy_reference(keys: np.ndarray, block_size: int = 512) -> n
             
     return energies
 
+def compute_query_aware_bounds_reference(q: np.ndarray, keys: np.ndarray, block_size: int = 512) -> np.ndarray:
+    """Computes the reference query-aware bounds per block using numpy FWHT.
+    
+    Args:
+        q: Query array of shape (seq_len_q, num_heads, head_dim).
+        keys: Key array of shape (seq_len_k, num_heads, head_dim).
+        block_size: Size of block to segment sequence into (e.g. 512).
+        
+    Returns:
+        An array of shape (seq_len_q, num_blocks, num_heads) containing logit bounds.
+    """
+    seq_len_k, num_heads, head_dim = keys.shape
+    seq_len_q = q.shape[0]
+    num_blocks = seq_len_k // block_size
+    bounds = np.zeros((seq_len_q, num_blocks, num_heads), dtype=np.float64)
+    
+    for h in range(num_heads):
+        for b in range(num_blocks):
+            block_keys = keys[b * block_size : (b + 1) * block_size, h, :]
+            spectral = numpy_fwht(block_keys)
+            
+            dc = spectral[0]
+            ac = spectral[1:]
+            ac_energy = np.sum(ac ** 2)
+            
+            block_mean = dc / np.sqrt(block_size)
+            
+            for qi in range(seq_len_q):
+                q_vec = q[qi, h, :]
+                alignment = np.dot(q_vec, block_mean) / np.sqrt(head_dim)
+                q_norm = np.linalg.norm(q_vec)
+                residual = (q_norm * np.sqrt(ac_energy)) / np.sqrt(head_dim)
+                bounds[qi, b, h] = alignment + residual
+                
+    return bounds
+
+
 def compute_tv_distance(alpha: np.ndarray, alpha_hat: np.ndarray) -> float:
     """Computes the Total Variation (TV) distance between two attention distributions.
     

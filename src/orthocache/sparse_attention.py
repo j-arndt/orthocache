@@ -65,33 +65,58 @@ def jax_block_sparse_attention(
 
 # Pallas Kernel helper functions for TPU compilation
 def pallas_sparse_attention_kernel(q_ref, k_ref, v_ref, mask_ref, out_ref, block_size):
-    """Pallas kernel function that executes block-sparse attention.
+    """Pallas kernel function that executes block-sparse attention with online softmax."""
+    q = q_ref[...]  # Shape: (seq_len_q, 1, head_dim)
+    q = q.squeeze(1)  # (seq_len_q, head_dim)
     
-    This kernel is designed to be compiled via jax.experimental.pallas on TPU.
+    seq_len_k = k_ref.shape[0]
+    num_blocks = seq_len_k // block_size
+    head_dim = q.shape[-1]
+    scale = jnp.sqrt(jnp.float32(head_dim))
     
-    Uses jnp.where() for conditional execution instead of Python `if` branches,
-    which cannot be traced by JAX and would fail XLA compilation. The mask scalar
-    gates the output: inactive blocks produce zero contribution without requiring
-    Python-level control flow over traced values.
-    """
-    # Load query, keys, values, and mask
-    q = q_ref[...]
-    k = k_ref[...]
-    v = v_ref[...]
-    mask = mask_ref[...]
+    seq_len_q = q.shape[0]
     
-    # Compute dot product attention
-    # scale factor uses float cast to ensure bfloat16 compatibility
-    scale = jnp.sqrt(jnp.float32(q.shape[-1]))
-    logits = jnp.matmul(q, k.T) / scale
-    weights = jax.nn.softmax(logits, axis=-1)
-    attn_out = jnp.matmul(weights, v)
+    # Initialize online softmax accumulators
+    r_max = jnp.full((seq_len_q, 1), -1e9, dtype=jnp.float32)
+    r_sum = jnp.zeros((seq_len_q, 1), dtype=jnp.float32)
+    r_out = jnp.zeros((seq_len_q, head_dim), dtype=jnp.float32)
     
-    # Gate the output by the block mask: evicted blocks produce zeros.
-    # jnp.where is traceable and compiles cleanly through Mosaic LLO.
-    # The mask is a scalar boolean loaded from SMEM via PrefetchScalarGridSpec.
-    mask_scalar = mask.reshape(())  # ensure scalar shape for broadcasting
-    out_ref[...] = jnp.where(mask_scalar, attn_out, jnp.zeros_like(attn_out))
+    # Loop over blocks
+    for b in range(num_blocks):
+        # Load mask value for block b, head 0 (since head dimension is blocked to size 1)
+        mask_val = mask_ref[b, 0]  # boolean scalar
+        
+        # Load key and value blocks. Note that head index is 0 in local block reference
+        k_block = k_ref[b * block_size : (b + 1) * block_size, 0, :]  # (block_size, head_dim)
+        v_block = v_ref[b * block_size : (b + 1) * block_size, 0, :]  # (block_size, head_dim)
+        
+        # Compute dot product attention
+        logits = jnp.matmul(q, k_block.T) / scale  # (seq_len_q, block_size)
+        
+        # Determine local max for this block
+        local_max = jnp.max(logits, axis=-1, keepdims=True)
+        new_max = jnp.maximum(r_max, local_max)
+        
+        # Softmax scaling terms
+        exp_logits = jnp.exp(logits - new_max)
+        sum_exp = jnp.sum(exp_logits, axis=-1, keepdims=True)
+        
+        scale_old = jnp.exp(r_max - new_max)
+        
+        # Next accumulators
+        next_sum = r_sum * scale_old + sum_exp
+        next_out = r_out * scale_old + jnp.matmul(exp_logits, v_block)
+        
+        # Update dynamically based on mask
+        r_max = jnp.where(mask_val, new_max, r_max)
+        r_sum = jnp.where(mask_val, next_sum, r_sum)
+        r_out = jnp.where(mask_val, next_out, r_out)
+        
+    # Normalize final output
+    final_out = r_out / jnp.maximum(r_sum, 1e-9)
+    
+    # Write to output (add head dimension back)
+    out_ref[...] = final_out[:, jnp.newaxis, :]
 
 def compile_pallas_sparse_attention(
     q: jax.Array,
@@ -123,14 +148,15 @@ def compile_pallas_sparse_attention(
             q_r, k_r, v_r, m_r, o_r, block_size
         ),
         out_shape=out_shape,
-        grid=(num_blocks, num_heads),
+        grid=(num_heads,),
         in_specs=[
-            pl.BlockSpec(lambda b, h: (0, h, 0), (seq_len_q, 1, head_dim)),
-            pl.BlockSpec(lambda b, h: (b * block_size, h, 0), (block_size, 1, head_dim)),
-            pl.BlockSpec(lambda b, h: (b * block_size, h, 0), (block_size, 1, head_dim)),
-            pl.BlockSpec(lambda b, h: (b, h), (1, 1)),
+            pl.BlockSpec(lambda h: (0, h, 0), (seq_len_q, 1, head_dim)),
+            pl.BlockSpec(lambda h: (0, h, 0), (keys.shape[0], 1, head_dim)),
+            pl.BlockSpec(lambda h: (0, h, 0), (keys.shape[0], 1, head_dim)),
+            pl.BlockSpec(lambda h: (0, h), (num_blocks, 1)),
         ],
-        out_specs=pl.BlockSpec(lambda b, h: (0, h, 0), (seq_len_q, 1, head_dim)),
+        out_specs=pl.BlockSpec(lambda h: (0, h, 0), (seq_len_q, 1, head_dim)),
     )(q, keys, values, block_mask)
     
     return out
+

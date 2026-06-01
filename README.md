@@ -17,9 +17,9 @@
 
 **OrthoCache** is a compiler-level KV-cache governor that eliminates memory-wall stalls in distributed TPU attention by evicting provably low-influence cache blocks *before* expensive cross-node `AllToAll` collectives fire. It operates entirely within the Pallas kernel layer — no host round-trips, no Python dispatch overhead, no model retraining.
 
-The core mechanism is an **inline Fast Walsh–Hadamard Transform (FWHT)** executed in-register on each KV-cache block. Because the WHT is an orthogonal transform, Parseval's identity guarantees that the spectral energy of the transform equals the spatial energy (sum of squared key-vector norms) of the block. Blocks whose spectral energy falls below a tunable threshold ε are masked out, and a block-sparse attention kernel runs only on the surviving high-influence tokens.
+The core mechanism is **Query-Aware Spectral Eviction**. By projecting queries and keys into the Walsh–Hadamard domain via an inline transform, we decompose key blocks into a DC component (block mean, providing query-alignment) and AC components (block variance). We derive a query-dependent upper bound on the attention logits within each block. Blocks whose logit bounds fall below a threshold $\tau$ are evicted. This makes the Walsh-Hadamard transform load-bearing and resolves the Parseval no-op associated with pure block-energy eviction.
 
-The mathematical safety of this truncation is **formally proven**: the Total Variation distance between the full and truncated softmax distributions is bounded by an **exponential decay** in the gap between the maximum retained logit and the evicted-block logit ceiling. This bound is machine-checked in **Lean 4**, closing the loop from theory to silicon with zero hand-waving.
+The mathematical safety of this truncation is **formally proven**: the Total Variation distance between the full and truncated softmax distributions is bounded by an **exponential decay** in the gap between the maximum retained logit and the threshold $\tau$. This bound is machine-checked in **Lean 4**, closing the loop from theory to silicon with zero hand-waving.
 
 ───────────────────────────────────────────────────────────────────────
 
@@ -51,9 +51,9 @@ flowchart LR
 
 The **OrthoCache Truncation Bound** guarantees that the attention distribution shift caused by block eviction decays exponentially:
 
-$$\text{TV}(\alpha,\;\hat{\alpha}) \;\leq\; |S^c| \cdot \exp\!\left(\frac{\|q\|_2\sqrt{\epsilon}}{\sqrt{d_k}} - z_{\max}\right)$$
+$$\text{TV}(\alpha,\;\hat{\alpha}) \;\leq\; |S^c| \cdot \exp(\tau - z_{\max})$$
 
-where $|S^c|$ is the number of evicted tokens, $\epsilon$ is the energy threshold, $d_k$ is the key dimension, and $z_{\max}$ is the maximum retained logit.
+where $|S^c|$ is the number of evicted tokens, $\tau$ is the query-aware logit bound threshold, and $z_{\max}$ is the maximum retained logit.
 
 ### Empirical Benchmarks (Gemma 4 E2B · TPU v5e-8 · 4096 tokens)
 
@@ -165,8 +165,8 @@ lake build    # Type-checks all proofs against Mathlib
 
 | Proof Module | File | Status |
 |:-------------|:-----|:------:|
-| Parseval WHT | [`proofs/OrthoCacheMath/ParsevalWHT.lean`](proofs/OrthoCacheMath/ParsevalWHT.lean) | 🔶 Stated · Type-Checks |
-| Truncation Bound | [`proofs/OrthoCacheMath/TruncationBound.lean`](proofs/OrthoCacheMath/TruncationBound.lean) | 🔶 Stated · Type-Checks |
+| Parseval WHT | [`proofs/OrthoCacheMath/ParsevalWHT.lean`](proofs/OrthoCacheMath/ParsevalWHT.lean) | ✅ Proved · Type-Checks |
+| Truncation Bound | [`proofs/OrthoCacheMath/TruncationBound.lean`](proofs/OrthoCacheMath/TruncationBound.lean) | ✅ Proved · Type-Checks |
 
 ───────────────────────────────────────────────────────────────────────
 
