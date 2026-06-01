@@ -111,12 +111,25 @@ def _extract_key_caches(model: Any, input_ids: Any) -> list[np.ndarray]:
     past_kv = outputs.past_key_values
     key_arrays: list[np.ndarray] = []
 
-    # DynamicCache API (transformers >= 4.36, used by Gemma 4)
-    if hasattr(past_kv, "key_cache"):
+    # DynamicCache API (transformers 4.36-4.47)
+    if hasattr(past_kv, "key_cache") and isinstance(past_kv.key_cache, list) and len(past_kv.key_cache) > 0:
         for layer_idx in range(len(past_kv.key_cache)):
-            # shape: (batch, num_kv_heads, seq_len, head_dim)
             k = past_kv.key_cache[layer_idx][0]  # drop batch
-            # -> (seq_len, num_kv_heads, head_dim)
+            key_np = k.permute(1, 0, 2).float().cpu().numpy()
+            key_arrays.append(key_np)
+    elif hasattr(past_kv, "layers") and isinstance(past_kv.layers, list) and len(past_kv.layers) > 0:
+        # Newest DynamicCache (transformers >= 4.48) — per-layer objects in .layers
+        first_layer = past_kv.layers[0]
+        for lc in past_kv.layers:
+            if isinstance(lc, (list, tuple)):
+                k = lc[0][0]
+            elif hasattr(lc, "key_cache"):
+                k = lc.key_cache[0] if lc.key_cache.dim() == 4 else lc.key_cache
+            elif hasattr(lc, "key"):
+                k = lc.key[0] if lc.key.dim() == 4 else lc.key
+            else:
+                raise TypeError(f"Unknown layer cache format: {type(lc).__name__}, "
+                                f"attrs: {[a for a in dir(lc) if not a.startswith('_')]}")
             key_np = k.permute(1, 0, 2).float().cpu().numpy()
             key_arrays.append(key_np)
     else:

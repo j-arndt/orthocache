@@ -106,25 +106,41 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
     layer_kvs: list[tuple] = []
 
     if hasattr(past_kv, "key_cache") and isinstance(past_kv.key_cache, list) and len(past_kv.key_cache) > 0:
-        # DynamicCache with key_cache / value_cache (transformers >= 4.36)
+        # DynamicCache with key_cache / value_cache (transformers 4.36-4.47)
         for i in range(len(past_kv.key_cache)):
             layer_kvs.append((past_kv.key_cache[i], past_kv.value_cache[i]))
+    elif hasattr(past_kv, "layers") and isinstance(past_kv.layers, list) and len(past_kv.layers) > 0:
+        # Newest DynamicCache (transformers >= 4.48) stores per-layer objects in .layers
+        first_layer = past_kv.layers[0]
+        if isinstance(first_layer, (list, tuple)) and len(first_layer) >= 2:
+            # layers is a list of (key_tensor, value_tensor) tuples
+            for item in past_kv.layers:
+                layer_kvs.append((item[0], item[1]))
+        elif hasattr(first_layer, "key_cache") and hasattr(first_layer, "value_cache"):
+            # layers is a list of LayerCache objects with .key_cache / .value_cache
+            for lc in past_kv.layers:
+                layer_kvs.append((lc.key_cache, lc.value_cache))
+        elif hasattr(first_layer, "key") and hasattr(first_layer, "value"):
+            for lc in past_kv.layers:
+                layer_kvs.append((lc.key, lc.value))
+        else:
+            print(f"  DEBUG: layers[0] type = {type(first_layer).__name__}")
+            print(f"  DEBUG: layers[0] attrs = {[a for a in dir(first_layer) if not a.startswith('_')]}")
+            if hasattr(first_layer, "__dict__"):
+                print(f"  DEBUG: layers[0] __dict__ keys = {list(vars(first_layer).keys())}")
+            raise TypeError(f"Unknown layer cache format: {type(first_layer).__name__}")
     elif hasattr(past_kv, "_cache") and isinstance(past_kv._cache, list):
-        # Some DynamicCache versions store [(k, v), ...] in _cache
         for item in past_kv._cache:
             layer_kvs.append((item[0], item[1]))
     elif isinstance(past_kv, (list, tuple)) and len(past_kv) > 0:
-        # Legacy tuple-of-tuples
         for item in past_kv:
             layer_kvs.append((item[0], item[1]))
     else:
-        # Last resort: inspect __dict__ for lists of tensors
         print(f"  DEBUG: past_kv type = {type(past_kv).__name__}")
         print(f"  DEBUG: past_kv attrs = {[a for a in dir(past_kv) if not a.startswith('__')]}")
         cache_dict = vars(past_kv) if hasattr(past_kv, "__dict__") else {}
         print(f"  DEBUG: __dict__ keys = {list(cache_dict.keys())}")
 
-        # Try to find any list of tensors
         for attr_name, attr_val in cache_dict.items():
             if isinstance(attr_val, list) and len(attr_val) > 0:
                 first = attr_val[0]
