@@ -1,9 +1,12 @@
 """OrthoCache Spectral Analysis Benchmark.
 
-Loads a causal-LM model (default: google/gemma-2b), runs a long-context
+Loads a causal-LM model (default: Gemma 4 E2B on Kaggle), runs a long-context
 forward pass, extracts KV-cache key tensors from intermediate decoder layers,
 applies the 512-point Fast Walsh-Hadamard Transform, and reports the spectral
 energy distribution across blocks.
+
+The --model flag accepts both HuggingFace hub IDs and local filesystem paths
+(e.g. a Kaggle model input directory).
 
 Outputs
 -------
@@ -14,7 +17,7 @@ Outputs
 Usage
 -----
     python benchmarks/spectral_analysis.py --seq_len 8192
-    python benchmarks/spectral_analysis.py --model google/gemma-2b --seq_len 16384 --output_dir benchmarks/plots
+    python benchmarks/spectral_analysis.py --model /kaggle/input/models/google/gemma-4/transformers/gemma-4-e2b/1 --seq_len 16384
 """
 
 from __future__ import annotations
@@ -191,8 +194,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="OrthoCache spectral-energy analysis on real KV-cache activations.",
     )
-    parser.add_argument("--model", type=str, default="google/gemma-2b",
-                        help="HuggingFace model name (default: google/gemma-2b).")
+    parser.add_argument("--model", type=str,
+                        default="/kaggle/input/models/google/gemma-4/transformers/gemma-4-e2b/1",
+                        help="HuggingFace model name or local path (default: Kaggle Gemma 4 E2B).")
     parser.add_argument("--seq_len", type=int, default=8192,
                         help="Sequence length in tokens (default: 8192).")
     parser.add_argument("--output_dir", type=str, default="benchmarks/plots",

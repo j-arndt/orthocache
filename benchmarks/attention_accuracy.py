@@ -19,7 +19,7 @@ Outputs
 Usage
 -----
     python benchmarks/attention_accuracy.py --seq_len 4096
-    python benchmarks/attention_accuracy.py --model google/gemma-2b --seq_len 8192
+    python benchmarks/attention_accuracy.py --model /kaggle/input/models/google/gemma-4/transformers/gemma-4-e2b/1 --seq_len 8192
 """
 
 from __future__ import annotations
@@ -245,8 +245,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="OrthoCache attention-accuracy benchmark at multiple eviction rates.",
     )
-    parser.add_argument("--model", type=str, default="google/gemma-2b",
-                        help="HuggingFace model name (default: google/gemma-2b).")
+    parser.add_argument("--model", type=str,
+                        default="/kaggle/input/models/google/gemma-4/transformers/gemma-4-e2b/1",
+                        help="HuggingFace model name or local path (default: Kaggle Gemma 4 E2B).")
     parser.add_argument("--seq_len", type=int, default=4096,
                         help="Sequence length in tokens (default: 4096).")
     parser.add_argument("--query_len", type=int, default=16,
