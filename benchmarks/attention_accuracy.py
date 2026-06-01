@@ -89,11 +89,11 @@ def _build_prompt(tokenizer: Any, seq_len: int) -> Any:
 def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarray]:
     """Forward pass → (keys, values) each of shape (seq_len, num_kv_heads, head_dim).
 
-    Handles both the modern ``DynamicCache`` API and legacy tuple format.
-
-    For hybrid sliding-window / global-attention models like Gemma 4, this
-    selects the **longest-cached layer** (a global-attention layer) since
-    those are the ones where KV-cache eviction is meaningful.
+    Handles every known ``past_key_values`` format:
+      - ``DynamicCache`` with ``.key_cache`` / ``.value_cache`` lists
+      - ``DynamicCache`` with ``._cache`` list-of-tuples (some versions)
+      - Legacy tuple-of-tuples
+    Falls back to introspecting ``__dict__`` if none of the above match.
     """
     import torch
 
@@ -102,20 +102,52 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
 
     past_kv = outputs.past_key_values
 
-    # DynamicCache API (transformers >= 4.36, used by Gemma 4)
-    if hasattr(past_kv, "key_cache"):
-        # Find the layer with the longest cached sequence (global attention layer)
-        seq_lens = [past_kv.key_cache[i].shape[2] for i in range(len(past_kv.key_cache))]
-        layer_idx = int(np.argmax(seq_lens))
-        print(f"  Selected layer {layer_idx} (global attention, {seq_lens[layer_idx]} tokens cached)")
+    # Collect (key_tensor, value_tensor) per layer — each (batch, heads, seq, dim)
+    layer_kvs: list[tuple] = []
 
-        k = past_kv.key_cache[layer_idx][0]   # (num_kv_heads, seq_len, head_dim)
-        v = past_kv.value_cache[layer_idx][0]
+    if hasattr(past_kv, "key_cache") and isinstance(past_kv.key_cache, list) and len(past_kv.key_cache) > 0:
+        # DynamicCache with key_cache / value_cache (transformers >= 4.36)
+        for i in range(len(past_kv.key_cache)):
+            layer_kvs.append((past_kv.key_cache[i], past_kv.value_cache[i]))
+    elif hasattr(past_kv, "_cache") and isinstance(past_kv._cache, list):
+        # Some DynamicCache versions store [(k, v), ...] in _cache
+        for item in past_kv._cache:
+            layer_kvs.append((item[0], item[1]))
+    elif isinstance(past_kv, (list, tuple)) and len(past_kv) > 0:
+        # Legacy tuple-of-tuples
+        for item in past_kv:
+            layer_kvs.append((item[0], item[1]))
     else:
-        # Legacy tuple-of-tuples format
-        layer_idx = min(1, len(past_kv) - 1)
-        k = past_kv[layer_idx][0][0]
-        v = past_kv[layer_idx][1][0]
+        # Last resort: inspect __dict__ for lists of tensors
+        print(f"  DEBUG: past_kv type = {type(past_kv).__name__}")
+        print(f"  DEBUG: past_kv attrs = {[a for a in dir(past_kv) if not a.startswith('__')]}")
+        cache_dict = vars(past_kv) if hasattr(past_kv, "__dict__") else {}
+        print(f"  DEBUG: __dict__ keys = {list(cache_dict.keys())}")
+
+        # Try to find any list of tensors
+        for attr_name, attr_val in cache_dict.items():
+            if isinstance(attr_val, list) and len(attr_val) > 0:
+                first = attr_val[0]
+                if hasattr(first, "shape"):
+                    print(f"  DEBUG: Found tensor list in '{attr_name}', len={len(attr_val)}, shape[0]={first.shape}")
+
+        raise TypeError(
+            f"Cannot extract KV-cache from {type(past_kv).__name__}. "
+            f"Attrs: {[a for a in dir(past_kv) if not a.startswith('__')]}"
+        )
+
+    if not layer_kvs:
+        raise ValueError("No KV-cache layers found in model output")
+
+    # Select the layer with the longest cached sequence (global attention layer)
+    seq_lens = [kv[0].shape[2] for kv in layer_kvs]
+    layer_idx = int(np.argmax(seq_lens))
+    print(f"  Selected layer {layer_idx}/{len(layer_kvs)} "
+          f"(seq_len={seq_lens[layer_idx]}, heads={layer_kvs[layer_idx][0].shape[1]}, "
+          f"head_dim={layer_kvs[layer_idx][0].shape[3]})")
+
+    k = layer_kvs[layer_idx][0][0]  # drop batch → (heads, seq, dim)
+    v = layer_kvs[layer_idx][1][0]
 
     keys = k.permute(1, 0, 2).float().cpu().numpy()    # (seq, heads, dim)
     values = v.permute(1, 0, 2).float().cpu().numpy()
