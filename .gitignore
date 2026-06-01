@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Lean 4
+proofs/.lake/
+proofs/lake-packages/
+proofs/build/
+
+# Benchmarks output
+benchmarks/plots/*.png
+benchmarks/plots/*.svg
+benchmarks/plots/*.pdf
+*.xprof
+
+# JAX
+*.npy
+*.npz
