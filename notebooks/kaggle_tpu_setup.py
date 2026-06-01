@@ -77,7 +77,7 @@ print(f"  ✅ fwht_512: shape={fwht_result.shape}, dtype={fwht_result.dtype}, "
 print("\n[2/3] Compiling compute_block_energy_jax + generate_threshold_mask ...")
 keys_3d = jax.random.normal(jax.random.PRNGKey(1), (1024, 4, 64), dtype=jnp.bfloat16)
 t0 = time.perf_counter()
-energies = jax.jit(compute_block_energy_jax)(keys_3d, 512)
+energies = jax.jit(compute_block_energy_jax, static_argnums=(1,))(keys_3d, 512)
 energies.block_until_ready()
 mask = generate_threshold_mask(energies, epsilon=1.0)
 mask.block_until_ready()
