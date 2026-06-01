@@ -53,6 +53,12 @@ assert os.path.exists(GEMMA_PATH), (
 )
 print(f"✅ Gemma 4 E2B found at {GEMMA_PATH}")
 
+# Upgrade transformers — Gemma 4 tokenizer requires a recent version
+print("Upgrading transformers for Gemma 4 compatibility ...")
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "transformers"],
+               check=True)
+print("✅ transformers upgraded")
+
 
 # --- CELL 3: GATE 1 — Compilation Test ---
 import jax
