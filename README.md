@@ -7,7 +7,7 @@
     <a href="https://www.python.org/downloads/"><img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white" /></a>
     <a href="https://github.com/google/jax"><img alt="JAX" src="https://img.shields.io/badge/JAX-%E2%89%A50.4.25-9cf?logo=google&logoColor=white" /></a>
     <a href="https://leanprover.github.io/"><img alt="Lean 4 Type-Checked" src="https://img.shields.io/badge/Lean_4-Type--Checked-brightgreen?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHRleHQgeD0iMCIgeT0iMTQiIGZvbnQtc2l6ZT0iMTQiPuKckyA8L3RleHQ+PC9zdmc+" /></a>
-    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
+    <a href="LICENSE"><img alt="License: PolyForm Noncommercial" src="https://img.shields.io/badge/license-PolyForm%20NC%201.0-blue.svg" /></a>
   </p>
 </p>
 
@@ -206,7 +206,7 @@ If you use OrthoCache in your research, please cite:
 @article{orthocache2026,
   title     = {OrthoCache: Hardware-Native Spectral Energy Thresholding
                Governor for TPU KV-Cache Optimization},
-  author    = {TBD},
+  author    = {Arndt, Justin},
   journal   = {TechRxiv Preprint},
   year      = {2026},
   note      = {Preprint submitted. arXiv ID pending.}
@@ -217,7 +217,13 @@ If you use OrthoCache in your research, please cite:
 
 ## License
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+This project is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+You are free to use, study, modify, and redistribute OrthoCache for **any non-commercial purpose** — including academic research, personal experimentation, benchmarking, and evaluation.
+
+**Commercial use** (deployment in production systems, integration into commercial products or services) requires a separate commercial license.
+
+📧 **Commercial licensing inquiries:** [justinarndt05@gmail.com](mailto:justinarndt05@gmail.com)
 
 ───────────────────────────────────────────────────────────────────────
 
