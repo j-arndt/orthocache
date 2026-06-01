@@ -1,0 +1,23 @@
+# Ignore everything by default, then whitelist
+*
+
+# Source code
+!src/
+!tests/
+!lean/
+
+# Config
+!pyproject.toml
+!README.md
+!Dockerfile
+
+# Docs (not needed in container)
+# !docs/
+
+# Exclude build artifacts, caches, notebooks
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/deepresearch/
+**/*.ipynb
+**/.git

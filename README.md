@@ -94,6 +94,12 @@ $env:PYTHONPATH="src"; pytest -p no:dandi
 cd proofs && lake build
 ```
 
+**Docker (reproducible validation):**
+```bash
+docker build --target test -t orthocache:test .
+docker run --rm orthocache:test    # runs pytest (15/15 tests)
+```
+
 ───────────────────────────────────────────────────────────────────────
 
 ## Repository Structure
@@ -104,14 +110,15 @@ orthocache/
 │   └── orthocache/
 │       ├── __init__.py              # Public API surface
 │       ├── fwht.py                  # Fast Walsh–Hadamard Transform (512-tile)
-│       ├── spectral_energy.py       # Block energy computation & threshold masks
+│       ├── spectral_energy.py       # Multi-band spectral decomposition & ζ filter
 │       ├── sparse_attention.py      # Pallas block-sparse attention kernel
-│       └── reference.py            # NumPy reference implementations
+│       └── reference.py             # NumPy reference implementations
 ├── tests/
 │   ├── test_fwht.py                 # FWHT correctness & Parseval verification
 │   ├── test_energy.py               # Spectral energy & masking tests
 │   ├── test_attention.py            # Sparse vs. dense attention equivalence
-│   └── test_truncation_bound.py     # TV-bound empirical validation
+│   ├── test_truncation_bound.py     # TV-bound empirical validation
+│   └── test_spectral_bands.py       # Multi-band ζ tests (proves FWHT is load-bearing)
 ├── proofs/
 │   ├── lakefile.lean                # Lean 4 project configuration
 │   ├── lean-toolchain               # Lean toolchain version pin
@@ -119,6 +126,8 @@ orthocache/
 │   └── OrthoCacheMath/
 │       ├── ParsevalWHT.lean         # Parseval's identity for WHT
 │       └── TruncationBound.lean     # Exponential TV-distance bound
+├── paper/
+│   └── orthocache_techrvix.tex      # IEEE-format LaTeX (TechRxiv preprint)
 ├── benchmarks/
 │   ├── spectral_analysis.py         # KV-cache spectral energy profiling
 │   ├── attention_accuracy.py        # TV/KL divergence at varying eviction rates
@@ -126,9 +135,11 @@ orthocache/
 │   ├── plots/                       # Generated figures + CSVs
 │   └── results/                     # Profiling JSON output
 ├── docs/
-│   ├── mathematical_framework.md    # Full 5-step proof chain
+│   ├── mathematical_framework.md    # Full proof chain (§1–§5 + §3.2 multi-band, §3.3 FWHT necessity)
 │   ├── cost_benefit_analysis.md     # Fleet-scale economic model
-│   └── technical_report.md          # Technical paper (TechRxiv preprint)
+│   └── technical_report.md          # Technical paper (markdown source)
+├── Dockerfile                       # Multi-stage reproducible validation build
+├── .dockerignore                    # Docker build context filter
 ├── pyproject.toml                   # Build configuration & dependencies
 └── README.md                        # ← You are here
 ```
