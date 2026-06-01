@@ -21,28 +21,22 @@ assert jax.default_backend() == "tpu", "ERROR: Not running on TPU!"
 print(f"\n✅ TPU v5e detected: {len(jax.devices())} chips")
 
 
-# --- CELL 2: Upload or Clone the OrthoCache codebase ---
-# OPTION A: If you uploaded the codebase as a Kaggle dataset
-# import sys
-# sys.path.insert(0, "/kaggle/input/orthocache/src")
-
-# OPTION B: If the repo is on GitHub (j-arndt/orthocache)
-# !pip install -q git+https://github.com/j-arndt/orthocache.git
-
-# OPTION C: Upload as zip and extract (RECOMMENDED for quick iteration)
-# Upload orthocache.zip as a dataset, then:
+# --- CELL 2: Clone the OrthoCache codebase from GitHub ---
+import subprocess
 import sys
 import os
 
-# Adjust this path based on your Kaggle dataset name
-DATASET_PATH = "/kaggle/input/orthocache-src"
-if os.path.exists(DATASET_PATH):
-    sys.path.insert(0, os.path.join(DATASET_PATH, "src"))
-    print(f"✅ OrthoCache loaded from dataset: {DATASET_PATH}")
+REPO_URL = "https://github.com/j-arndt/orthocache.git"
+CLONE_DIR = "/kaggle/working/orthocache"
+
+if not os.path.exists(CLONE_DIR):
+    print(f"Cloning {REPO_URL} ...")
+    subprocess.run(["git", "clone", REPO_URL, CLONE_DIR], check=True)
+    print(f"✅ Cloned to {CLONE_DIR}")
 else:
-    # Fallback: assume we're running from a cloned repo
-    sys.path.insert(0, "/kaggle/working/orthocache/src")
-    print("⚠ Dataset not found, using /kaggle/working/orthocache/src")
+    print(f"✅ Repo already exists at {CLONE_DIR}")
+
+sys.path.insert(0, os.path.join(CLONE_DIR, "src"))
 
 # Verify imports work
 from orthocache import fwht_512, compute_block_energy_jax, generate_threshold_mask
