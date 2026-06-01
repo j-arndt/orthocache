@@ -113,11 +113,13 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
         # Newest DynamicCache (transformers >= 4.48) stores per-layer objects in .layers
         first_layer = past_kv.layers[0]
         if isinstance(first_layer, (list, tuple)) and len(first_layer) >= 2:
-            # layers is a list of (key_tensor, value_tensor) tuples
             for item in past_kv.layers:
                 layer_kvs.append((item[0], item[1]))
+        elif hasattr(first_layer, "keys") and hasattr(first_layer, "values"):
+            # DynamicSlidingWindowLayer / DynamicLayer — .keys / .values
+            for lc in past_kv.layers:
+                layer_kvs.append((lc.keys, lc.values))
         elif hasattr(first_layer, "key_cache") and hasattr(first_layer, "value_cache"):
-            # layers is a list of LayerCache objects with .key_cache / .value_cache
             for lc in past_kv.layers:
                 layer_kvs.append((lc.key_cache, lc.value_cache))
         elif hasattr(first_layer, "key") and hasattr(first_layer, "value"):
@@ -152,18 +154,23 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
             f"Attrs: {[a for a in dir(past_kv) if not a.startswith('__')]}"
         )
 
-    if not layer_kvs:
-        raise ValueError("No KV-cache layers found in model output")
+    # Normalize all tensors to 3D: (heads, seq, dim)
+    def _to_3d(t):
+        if t.dim() == 4:
+            return t[0]  # drop batch
+        return t
+
+    layer_kvs = [(_to_3d(k), _to_3d(v)) for k, v in layer_kvs]
 
     # Select the layer with the longest cached sequence (global attention layer)
-    seq_lens = [kv[0].shape[2] for kv in layer_kvs]
+    seq_lens = [kv[0].shape[1] for kv in layer_kvs]  # (heads, seq, dim) → dim 1
     layer_idx = int(np.argmax(seq_lens))
     print(f"  Selected layer {layer_idx}/{len(layer_kvs)} "
-          f"(seq_len={seq_lens[layer_idx]}, heads={layer_kvs[layer_idx][0].shape[1]}, "
-          f"head_dim={layer_kvs[layer_idx][0].shape[3]})")
+          f"(seq_len={seq_lens[layer_idx]}, heads={layer_kvs[layer_idx][0].shape[0]}, "
+          f"head_dim={layer_kvs[layer_idx][0].shape[2]})")
 
-    k = layer_kvs[layer_idx][0][0]  # drop batch → (heads, seq, dim)
-    v = layer_kvs[layer_idx][1][0]
+    k = layer_kvs[layer_idx][0]  # (heads, seq, dim)
+    v = layer_kvs[layer_idx][1]
 
     keys = k.permute(1, 0, 2).float().cpu().numpy()    # (seq, heads, dim)
     values = v.permute(1, 0, 2).float().cpu().numpy()
