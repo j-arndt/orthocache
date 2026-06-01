@@ -47,37 +47,23 @@ from orthocache.reference import compute_tv_distance
 BLOCK_SIZE = 512
 
 
-def _get_device():
-    """Return the best available torch device (TPU > CUDA > CPU)."""
-    try:
-        import torch_xla.core.xla_model as xm
-        device = xm.xla_device()
-        print(f"  Using TPU device: {device}")
-        return device
-    except ImportError:
-        pass
-    import torch
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print(f"  Using CUDA device: {torch.cuda.get_device_name(0)}")
-        return device
-    print("  Using CPU device")
-    return torch.device("cpu")
-
-
 def _load_model_and_tokenizer(model_name: str) -> tuple[Any, Any]:
-    """Load a HuggingFace causal-LM and its tokenizer in bfloat16 on the best device."""
+    """Load a HuggingFace causal-LM and tokenizer in bfloat16 on CPU.
+
+    CPU is intentional — JAX owns the TPU in the notebook process.
+    The model is only used for one forward pass to extract KV-cache.
+    """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    device = _get_device()
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
+        device_map="cpu",
     )
-    model = model.to(device)
     model.eval()
+    print(f"  Model loaded on CPU ({sum(p.numel() for p in model.parameters()) / 1e9:.1f}B params)")
     return model, tokenizer
 
 
@@ -97,8 +83,7 @@ def _build_prompt(tokenizer: Any, seq_len: int) -> Any:
         pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id or 0
         padding = torch.full((1, seq_len - input_ids.shape[1]), pad_id, dtype=input_ids.dtype)
         input_ids = torch.cat([input_ids, padding], dim=1)
-    device = _get_device()
-    return input_ids.to(device)
+    return input_ids
 
 
 def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -111,11 +96,6 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
 
     with torch.no_grad():
         outputs = model(input_ids, use_cache=True)
-        try:
-            import torch_xla.core.xla_model as xm
-            xm.mark_step()
-        except ImportError:
-            pass
 
     past_kv = outputs.past_key_values
     layer_idx = min(1, len(past_kv) - 1)

@@ -165,21 +165,24 @@ print("=" * 60)
 
 
 # --- CELL 5: GATE 3 — Spectral Telemetry (Gemma 4 E2B) ---
-# Extract real KV-cache from Gemma 4 E2B and analyze spectral energy distribution
+# Run in-process (subprocess can't access TPU — the notebook process owns /dev/vfio)
 
-import subprocess
+import runpy
+
 ORTHOCACHE_DIR = "/kaggle/working/orthocache"
+sys.path.insert(0, os.path.join(ORTHOCACHE_DIR, "src"))
 
 print("=" * 60)
 print("GATE 3: Spectral Telemetry — Gemma 4 E2B")
 print("=" * 60)
 
-subprocess.run([
-    sys.executable, f"{ORTHOCACHE_DIR}/benchmarks/spectral_analysis.py",
+sys.argv = [
+    "spectral_analysis.py",
     "--model", GEMMA_PATH,
     "--seq_len", "8192",
     "--output_dir", "/kaggle/working/plots",
-], check=True, env={**os.environ, "PYTHONPATH": f"{ORTHOCACHE_DIR}/src"})
+]
+runpy.run_path(f"{ORTHOCACHE_DIR}/benchmarks/spectral_analysis.py", run_name="__main__")
 
 print("\n🎉 GATE 3 PASSED: Spectral energy data collected")
 
@@ -189,12 +192,13 @@ print("=" * 60)
 print("GATE 4: Accuracy vs Sparsity — Gemma 4 E2B")
 print("=" * 60)
 
-subprocess.run([
-    sys.executable, f"{ORTHOCACHE_DIR}/benchmarks/attention_accuracy.py",
+sys.argv = [
+    "attention_accuracy.py",
     "--model", GEMMA_PATH,
     "--seq_len", "4096",
     "--output_dir", "/kaggle/working/plots",
-], check=True, env={**os.environ, "PYTHONPATH": f"{ORTHOCACHE_DIR}/src"})
+]
+runpy.run_path(f"{ORTHOCACHE_DIR}/benchmarks/attention_accuracy.py", run_name="__main__")
 
 print("\n🎉 GATE 4 PASSED: Accuracy tradeoff curves generated")
 
@@ -204,12 +208,13 @@ print("=" * 60)
 print("GATE 5: Latency Profiling — TPU v5e-8")
 print("=" * 60)
 
-subprocess.run([
-    sys.executable, f"{ORTHOCACHE_DIR}/benchmarks/profiling.py",
+sys.argv = [
+    "profiling.py",
     "--seq_len", "4096",
     "--num_iters", "50",
     "--output_dir", "/kaggle/working/results",
-], check=True, env={**os.environ, "PYTHONPATH": f"{ORTHOCACHE_DIR}/src"})
+]
+runpy.run_path(f"{ORTHOCACHE_DIR}/benchmarks/profiling.py", run_name="__main__")
 
 print("\n🎉 GATE 5 PASSED: Profiling data collected")
 
