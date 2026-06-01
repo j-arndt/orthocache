@@ -65,7 +65,21 @@ def jax_block_sparse_attention(
 
 # Pallas Kernel helper functions for TPU compilation
 def pallas_sparse_attention_kernel(q_ref, k_ref, v_ref, mask_ref, out_ref, block_size):
-    """Pallas kernel function that executes block-sparse attention with online softmax."""
+    """Pallas kernel: block-sparse attention with online softmax and pre-matmul mask gating.
+    
+    Implementation note on FLOP savings:
+    We zero out k_block/v_block BEFORE the matmul for masked blocks, so the MXU
+    operates on zeros. This is correct-by-construction (zero keys produce zero logits,
+    zero values produce zero contributions). On TPU hardware, the matmul instruction
+    still fires (MXU doesn't branch), but zero-operand multiplies are:
+    (a) Data-correct: no contribution leaks from masked blocks
+    (b) Potentially elided by XLA's constant-folding pass for static masks
+    
+    True dynamic FLOP skip requires either:
+    - `pl.when()` to guard entire block computation (Pallas roadmap)
+    - An XLA HLO pass that reindexes the loop over only retained blocks
+    Both are described in docs/xla_pass_design.md for future work.
+    """
     q = q_ref[...]  # Shape: (seq_len_q, 1, head_dim)
     q = q.squeeze(1)  # (seq_len_q, head_dim)
     
@@ -83,15 +97,20 @@ def pallas_sparse_attention_kernel(q_ref, k_ref, v_ref, mask_ref, out_ref, block
     
     # Loop over blocks
     for b in range(num_blocks):
-        # Load mask value for block b, head 0 (since head dimension is blocked to size 1)
+        # Load mask value for block b
         mask_val = mask_ref[b, 0]  # boolean scalar
         
-        # Load key and value blocks. Note that head index is 0 in local block reference
+        # Load key and value blocks
         k_block = k_ref[b * block_size : (b + 1) * block_size, 0, :]  # (block_size, head_dim)
         v_block = v_ref[b * block_size : (b + 1) * block_size, 0, :]  # (block_size, head_dim)
         
-        # Compute dot product attention
-        logits = jnp.matmul(q, k_block.T) / scale  # (seq_len_q, block_size)
+        # Zero out k/v for masked blocks BEFORE matmul
+        # This prevents any data contribution from evicted blocks at the operand level
+        k_active = jnp.where(mask_val, k_block, jnp.zeros_like(k_block))
+        v_active = jnp.where(mask_val, v_block, jnp.zeros_like(v_block))
+        
+        # Compute dot product attention on active (or zeroed) data
+        logits = jnp.matmul(q, k_active.T) / scale  # (seq_len_q, block_size)
         
         # Determine local max for this block
         local_max = jnp.max(logits, axis=-1, keepdims=True)
@@ -105,9 +124,9 @@ def pallas_sparse_attention_kernel(q_ref, k_ref, v_ref, mask_ref, out_ref, block
         
         # Next accumulators
         next_sum = r_sum * scale_old + sum_exp
-        next_out = r_out * scale_old + jnp.matmul(exp_logits, v_block)
+        next_out = r_out * scale_old + jnp.matmul(exp_logits, v_active)
         
-        # Update dynamically based on mask
+        # Gate accumulation update on mask
         r_max = jnp.where(mask_val, new_max, r_max)
         r_sum = jnp.where(mask_val, next_sum, r_sum)
         r_out = jnp.where(mask_val, next_out, r_out)

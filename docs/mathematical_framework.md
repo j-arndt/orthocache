@@ -204,6 +204,82 @@ $$\text{TV}(\alpha, \hat{\alpha}) \leq |S^c| \cdot \exp(\tau - z_{\max})$$
 
 ---
 
+## 3.2 Multi-Band Sequency Filtering
+
+The query-aware bound in §3.1 uses the DC/AC decomposition to compute a per-block, per-query logit upper bound. However, the aggregate AC energy $E_j^{\text{AC}} = \sum_{s=1}^{b-1} \|\hat{K}_{j,s}\|_2^2$ collapses the entire non-DC spectrum into a single scalar. This scalar is exactly equal to the spatial variance via the bias-variance identity:
+
+$$E_j^{\text{AC}} = \sum_{i \in B_j} \|k_i - \bar{k}_j\|_2^2 = \sum_{i \in B_j} \|k_i\|_2^2 - b\|\bar{k}_j\|_2^2$$
+
+and is therefore computable in $O(bd_k)$ without the $O(bd_k \log b)$ FWHT.
+
+To make the FWHT **genuinely load-bearing**, OrthoCache partitions the 512 Walsh coefficients into discrete **sequency bands** and evaluates per-band energy, which *cannot* be recovered from spatial statistics.
+
+### Sequency Band Partitioning
+
+In the Walsh-Hadamard basis, **sequency** (the number of sign changes along a basis vector) corresponds directly to frequency. We partition the $b = 512$ coefficients into:
+
+| Band | Indices | Coefficients | Interpretation |
+|:-----|:--------|:-------------|:---------------|
+| DC | 0 | 1 | Block mean (macro-semantic pivot) |
+| Low-sequency | 1–63 | 63 | Smooth semantic trends across the block |
+| Mid-sequency | 64–255 | 192 | Syntactic/token-relational context |
+| High-sequency | 256–511 | 256 | Rapid oscillations, formatting noise |
+
+### The Spectral Decay Ratio ($\zeta$)
+
+We define the **Spectral Decay Ratio** $\zeta_j$ of block $B_j$ as:
+
+$$\zeta_j = \frac{\sum_{s=256}^{511} \|\hat{K}_{j,s}\|_2^2}{\sum_{s=1}^{63} \|\hat{K}_{j,s}\|_2^2 + \epsilon_{\text{stab}}}$$
+
+where $\epsilon_{\text{stab}} = 10^{-6}$ prevents division by zero.
+
+**Interpretation:**
+- **High $\zeta_j$ ($\gg 1$)**: The block's variance is dominated by high-frequency sign oscillations — characteristic of formatting tokens, punctuation sequences, and structural noise. These tokens have large activation magnitudes but lack coherent semantic structure.
+- **Low $\zeta_j$ ($\ll 1$)**: Energy concentrates in the structural low-frequency bands — characteristic of continuous human language, logical arguments, and long-range semantic dependencies.
+
+**Why $\zeta$ is uncomputable from spatial statistics:** Two blocks can have identical total spatial variance $\sum_{i} \|k_i - \bar{k}_j\|_2^2$ but entirely different spectral decay ratios. A block of repetitive JSON formatting tokens (`{`, `\"`, `}`) and a block of coherent technical prose may share the same Frobenius norm, but their frequency decompositions are radically different. The FWHT is the only operation that exposes this distinction.
+
+### Query-Independence and Pipeline Hoisting
+
+$\zeta_j$ is **deliberately query-independent**. It is a structural property of the key block, computed once when the block is written to the KV cache and stored as a static scalar metadata entry. This enables:
+
+1. **Asynchronous computation:** The FWHT and $\zeta$ computation execute during the initial KV-cache fill, amortized over thousands of subsequent decoding steps.
+2. **PrefetchScalarGridSpec pipeline:** The pre-computed boolean mask (from $\zeta$ and energy thresholds) streams into Scalar SRAM (SMEM) via `PrefetchScalarGridSpec` in parallel with query vector loading, introducing zero additional latency.
+3. **No circular dependency:** Query-modulated $\zeta$ would force re-running the FWHT across the entire cache on every decoding step, reintroducing the $O(Nd_k \log b)$ tax and negating OrthoCache's performance advantage.
+
+Query-awareness is achieved *without* query-dependent transforms: the query norm $\|q\|_2$ dynamically scales the eviction threshold $\tau$ at runtime, tightening or loosening retention based on the current query's activation magnitude.
+
+### Two-Gate Eviction Criterion
+
+OrthoCache retains block $B_j$ if and only if it passes **both** gates:
+
+1. **Query-aware logit bound (§3.1):** $\max_{q \in Q} \tau_j(q) \geq \tau$
+2. **Spectral coherence:** $\zeta_j \leq \zeta_{\max}$
+
+Gate 1 ensures blocks that could produce large attention logits for some query are retained. Gate 2 ensures blocks whose variance is dominated by high-frequency noise are evicted regardless of total energy — the key innovation that spatial variance cannot replicate.
+
+The truncation bound from §5 continues to apply: $\zeta$ filtering is a pre-gate that determines which blocks are *candidates* for the query-aware evaluation. The final eviction set $S^c$ is still governed by the logit bound $\tau$, and $\text{TV}(\alpha, \hat{\alpha}) \leq |S^c| \cdot \exp(\tau - z_{\max})$ holds unchanged.
+
+---
+
+## 3.3 Why the FWHT Is Necessary
+
+We directly address the Parseval redundancy observation: since the FWHT is an orthogonal isometry, $\|\hat{K}_j\|_F^2 = \|K_{B_j}\|_F^2$, and using the FWHT merely to compute aggregate block energy is a computational no-op — an $O(b \log b)$ computation for a quantity available in $O(b)$.
+
+OrthoCache subverts this no-op by **not collapsing the spectrum**. The critical quantities extracted from the FWHT are:
+
+1. **The DC component** $\hat{K}_{j,0}$ — used for query-mean alignment (§3.1). While equivalent to the block sum, it falls out naturally from the transform at zero marginal cost.
+
+2. **Per-band energy** $E_j^{\text{low}}$, $E_j^{\text{mid}}$, $E_j^{\text{high}}$ — computed as sums of squared coefficients within each sequency band. These are **not** recoverable from any spatial-domain statistic because the spatial domain provides only the aggregate variance $E_j^{\text{AC}} = E_j^{\text{low}} + E_j^{\text{mid}} + E_j^{\text{high}}$ but cannot decompose it by frequency.
+
+3. **The spectral decay ratio** $\zeta_j = E_j^{\text{high}} / E_j^{\text{low}}$ — a query-independent entropy signature that distinguishes semantically coherent blocks from noise-dominated blocks with identical total variance. This is the load-bearing metric.
+
+**Formal statement:** There exist blocks $A$ and $B$ with $E_A^{\text{AC}} = E_B^{\text{AC}}$ (identical spatial variance) but $\zeta_A \neq \zeta_B$ (different frequency decompositions). Therefore, no spatial-domain function $f(\{k_i\}_{i \in B_j})$ can compute $\zeta_j$ without access to the individual spectral coefficients provided by the FWHT.
+
+This is verified by construction in `tests/test_spectral_bands.py::test_zeta_not_computable_spatially`.
+
+---
+
 ## 4. Total Variation Bound (The Core Theorem)
 
 Let $S$ be the set of retained token indices and $S^c$ the set of evicted token indices. We define:

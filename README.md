@@ -17,7 +17,7 @@
 
 **OrthoCache** is a compiler-level KV-cache governor that eliminates memory-wall stalls in distributed TPU attention by evicting provably low-influence cache blocks *before* expensive cross-node `AllToAll` collectives fire. It operates entirely within the Pallas kernel layer — no host round-trips, no Python dispatch overhead, no model retraining.
 
-The core mechanism is **Query-Aware Spectral Eviction**. By projecting queries and keys into the Walsh–Hadamard domain via an inline transform, we decompose key blocks into a DC component (block mean, providing query-alignment) and AC components (block variance). We derive a query-dependent upper bound on the attention logits within each block. Blocks whose logit bounds fall below a threshold $\tau$ are evicted. This makes the Walsh-Hadamard transform load-bearing and resolves the Parseval no-op associated with pure block-energy eviction.
+The core mechanism is **Multi-Band Sequency Filtering**. By projecting key blocks into the Walsh–Hadamard domain via an inline 9-stage butterfly transform, we decompose the 512 spectral coefficients into discrete frequency bands: DC (block mean), low-sequency (smooth semantic trends), mid-sequency (syntactic context), and high-sequency (formatting noise). The **Spectral Decay Ratio** ($\zeta$) — the ratio of high-frequency to low-frequency energy — provides an information-theoretic entropy signature that is **impossible to compute from spatial statistics alone**. Combined with a query-aware logit upper bound, OrthoCache uses a **two-gate eviction criterion**: blocks must pass both a query-relevance gate and a spectral coherence gate to be retained.
 
 The mathematical safety of this truncation is **formally proven**: the Total Variation distance between the full and truncated softmax distributions is bounded by an **exponential decay** in the gap between the maximum retained logit and the threshold $\tau$. This bound is machine-checked in **Lean 4**, closing the loop from theory to silicon with zero hand-waving.
 
@@ -27,18 +27,21 @@ The mathematical safety of this truncation is **formally proven**: the Total Var
 
 ```mermaid
 flowchart LR
-    A["KV-Cache Blocks<br/><i>bfloat16 · 512-tile aligned</i>"] --> B["FWHT<br/><i>in-register · O(b log b)</i>"]
-    B --> C["DC / AC Split<br/><i>block mean + variance</i>"]
-    C --> D["Query-Aware Bounds<br/><i>τ_j = q·k̄ + ‖q‖√E_AC</i>"]
-    D --> E["Threshold Mask<br/><i>τ_j < τ → evict</i>"]
-    E --> F["SMEM<br/><i>block-sparse index</i>"]
-    F --> G["Pallas Sparse<br/>Attention Kernel"]
+    A["KV-Cache Blocks\n<i>bfloat16 · 512-tile aligned</i>"] --> B["FWHT\n<i>in-register · O(b log b)</i>"]
+    B --> C["Multi-Band Split\n<i>DC / Low / Mid / High</i>"]
+    C --> D1["ζ Filter\n<i>high/low energy ratio</i>"]
+    C --> D2["Query-Aware Bounds\n<i>τ_j = q·k̄ + ‖q‖√E_AC</i>"]
+    D1 --> E["Two-Gate Mask\n<i>ζ ≤ ζ_max AND τ_j ≥ τ</i>"]
+    D2 --> E
+    E --> F["SMEM\n<i>block-sparse index</i>"]
+    F --> G["Pallas Sparse\nAttention Kernel"]
     G --> H["Output"]
 
     style A fill:#1a1a2e,stroke:#e94560,color:#eee
     style B fill:#16213e,stroke:#0f3460,color:#eee
     style C fill:#16213e,stroke:#0f3460,color:#eee
-    style D fill:#1a1a2e,stroke:#e94560,color:#eee
+    style D1 fill:#e94560,stroke:#ff6b6b,color:#fff
+    style D2 fill:#1a1a2e,stroke:#e94560,color:#eee
     style E fill:#1a1a2e,stroke:#e94560,color:#eee
     style F fill:#0f3460,stroke:#53a8b6,color:#eee
     style G fill:#0f3460,stroke:#53a8b6,color:#eee
@@ -57,24 +60,16 @@ $$\text{TV}(\alpha,\;\hat{\alpha}) \;\leq\; |S^c| \cdot \exp(\tau - z_{\max})$$
 
 where $|S^c|$ is the number of evicted tokens, $\tau$ is the query-aware logit bound threshold, and $z_{\max}$ is the maximum retained logit.
 
-### Empirical Benchmarks (Gemma 4 E2B · TPU v5e-8 · 4096 tokens)
+### Empirical Status (Prototyping Phase)
 
-| Gate | Test | Result | Status |
-|:-----|:-----|:-------|:------:|
-| **G1** | All Pallas kernels compile on TPU v5e-8 | FWHT 180ms, Energy 847ms, Sparse Attn 76ms | ✅ |
-| **G2** | bfloat16 correctness vs CPU reference | FWHT rtol=0.73%, Energy rtol=0.41% | ✅ |
-| **G3** | KV-cache spectral analysis (35 layers) | 12 sliding-window + 3 global attention | ✅ |
-| **G4** | Truncation bound (10/30/50/70% eviction) | **0 violations**, recon error ≤1.57% | ✅ |
-| **G5** | Latency profiling | Dense: 1.2ms, Sparse: 19.6ms (prototype) | ✅ |
+| Test | Status | Note |
+|:-----|:-------|:-----|
+| Pallas FWHT Implementation | ✅ | Validated in v5e-8 kernel |
+| Correctness (bfloat16) | ⚠️ | Ongoing verification against reference |
+| Latency Overhead | ⊘ | Currently >10x slow-down (no hardware skipping) |
+| Bound Violation Rate | ✅ | 0 violations observed in synthetic tests |
 
-**Accuracy vs. Eviction Rate:**
-
-| Eviction | TV Distance | KL Divergence | Recon Error | Bound Violations |
-|:--------:|:-----------:|:-------------:|:-----------:|:----------------:|
-| 12.5% | 0.125 | 1.724 | 0.23% | 0 |
-| 37.5% | 0.375 | 5.226 | 0.95% | 0 |
-| 50.0% | 0.500 | 7.012 | 1.57% | 0 |
-| 62.5% | 0.625 | 8.822 | 1.45% | 0 |
+> **Note:** The current kernel is a functional prototype. It establishes the mathematical soundness and spectral transformation validity but does not yet implement the hardware-level FLOP skip required for latency improvements.
 
 ───────────────────────────────────────────────────────────────────────
 
@@ -174,15 +169,15 @@ lake build    # Type-checks all proofs against Mathlib
 
 ## Cost-Benefit Model
 
-OrthoCache includes a **macroeconomic infrastructure model** that translates measured empirical sparsity ($S$) and reclaimed throughput ($\Delta\tau$) into annual fleet-level dollar savings across OpEx (power) and CapEx (infrastructure deferral).
+**OrthoCache** includes a parameterized infrastructure model that translates block sparsity into projected annual fleet-level savings across OpEx (power) and CapEx (infrastructure deferral).
 
-| Scenario | Block Sparsity | TV Error | Throughput Gain | **Annual Fleet Value** |
-|:---------|:--------------:|:--------:|:---------------:|:----------------------:|
-| Conservative | 0.25 | ≤ 0.0005 | 10% | **$50.6M** |
-| Moderate | 0.50 | ≤ 0.0024 | 22% | **$109.2M** |
-| Aggressive | 0.70 | ≤ 0.0061 | 31% | **$153.7M** |
+| Scenario | Block Sparsity | OpEx Savings | CapEx Deferral | **Annual Fleet Value** |
+|:---------|:--------------:|:------------:|:--------------:|:----------------------:|
+| Conservative | 0.25 | $2.8M | $20M | **$22.8M** ⊘ |
+| Moderate | 0.50 | $5.6M | $60M | **$65.6M** ⊘ |
+| Aggressive | 0.70 | $7.8M | $100M | **$107.8M** ⊘ |
 
-Full model derivation and parameter sensitivity in [`docs/cost_benefit_analysis.md`](docs/cost_benefit_analysis.md).
+> **⊘ = Projected, not measured.** These figures assume the FLOP-skip kernel is deployed (requires XLA pass or `pl.when()` support). The current prototype kernel has a **negative throughput delta** (16× latency overhead vs dense attention). The economic value materializes only when the sparse kernel achieves net-positive throughput, which requires hardware-level block skipping. See [`docs/cost_benefit_analysis.md`](docs/cost_benefit_analysis.md) for the full model with ✓ (measured) and ⊘ (projected) epistemic markers.
 
 ───────────────────────────────────────────────────────────────────────
 

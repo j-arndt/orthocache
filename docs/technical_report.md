@@ -3,7 +3,7 @@
 **Justin Arndt**  
 justinarndt05@gmail.com  
 
-**Abstract.** We present OrthoCache, an inline KV-cache eviction governor for Transformer attention on TPU accelerators. OrthoCache uses a Fast Walsh-Hadamard Transform (FWHT) to decompose key blocks into spectral components, allowing query-aware attention bounds to be computed before distributed network collectives fire. We prove a formal Total Variation (TV) distance bound demonstrating that the attention approximation error decays exponentially in the gap between the query-aware eviction threshold and the maximum retained logit. We implement OrthoCache as JAX/Pallas kernels utilizing single-axis grid dispatch and online softmax accumulation to eliminate write-after-write races and softmax normalization errors. We evaluate OrthoCache on Gemma 4 31B (30.7B parameters, 60 layers) running on a TPU v5e-8 node. The OrthoCache Truncation Bound holds across all tested sequence lengths (4K–65K) with zero violations. Using our corrected Pallas kernel, OrthoCache achieves a 1.06× speedup at 4K tokens, scaling efficiently to long-context attention. The mathematical bounds are formally verified and type-checked in Lean 4.
+**Abstract.** We present OrthoCache, an inline KV-cache eviction governor for Transformer attention on TPU accelerators. OrthoCache uses a Fast Walsh-Hadamard Transform (FWHT) to decompose key blocks into discrete sequency bands, enabling both query-aware attention bounds and a query-independent Spectral Decay Ratio (ζ) that distinguishes semantically coherent blocks from noise-dominated blocks with identical spatial variance. We directly address the Parseval no-op objection: aggregate block energy is computable without the transform, but per-band energy decomposition is not. We prove a formal Total Variation (TV) distance bound demonstrating that the attention approximation error decays exponentially. We implement OrthoCache as JAX/Pallas kernels with online softmax accumulation. The mathematical bounds are formally verified in Lean 4 with zero `sorry` stubs.
 
 **Keywords:** KV-cache optimization, attention sparsity, Walsh-Hadamard transform, TPU, Pallas kernels, online softmax, formal verification
 
@@ -17,15 +17,15 @@ Existing KV-cache optimization methods fall into two main paradigms:
 1. **Passive compression** — quantization (e.g., TurboQuant [1]) and low-rank projection reduce the storage footprint but retain all tokens in the pipeline.
 2. **Token-level eviction** — Heavy-Hitter architectures (e.g., H₂O [2], StreamingLLM [3]) drop tokens, but require query-key attention scores to determine relevance, introducing a circular dependency that prevents pre-dispatch eviction.
 
-Furthermore, naive block-eviction schemes based only on key norm/energy (e.g., summing key norms within a block) run into a fundamental mathematical constraint: by Parseval's identity, applying an orthogonal transform (like the Walsh-Hadamard transform) preserves the Frobenius norm. Thus, a pure block-energy eviction decision is identical with or without the transform—making the transform a Parseval no-op that adds computation without changing the eviction set. Additionally, low-norm keys can still receive significant attention weight if they are highly aligned with the query.
+Furthermore, naive block-eviction schemes based only on key norm/energy run into a fundamental mathematical constraint: by Parseval's identity, applying an orthogonal transform preserves the Frobenius norm. Thus, computing aggregate block energy via the FWHT is a **Parseval no-op** — the transform adds $O(b \log b)$ computation for a quantity available in $O(b)$ via the bias-variance identity $\sum \|k_i - \mu\|^2 = \sum \|k_i\|^2 - b\|\mu\|^2$.
 
-To address these limitations, we introduce **OrthoCache**, which shifts the paradigm from block-energy eviction to **Query-Aware Spectral Eviction**. By projecting queries and keys into the Walsh-Hadamard domain, we decompose each block's keys into a DC component (block mean) and AC components (block variance). The alignment with the query on the DC component, combined with the AC energy, yields a mathematically rigorous upper bound on the maximum possible attention logit within the block. If this bound falls below a threshold $\tau$, the block is evicted before attention is computed.
+To address these limitations, we introduce **OrthoCache**, which subverts the Parseval no-op through **Multi-Band Sequency Filtering**. Rather than collapsing the Walsh-Hadamard spectrum into a single aggregate energy scalar, OrthoCache partitions the 512 spectral coefficients into discrete frequency bands (DC, low-sequency, mid-sequency, high-sequency) and computes the **Spectral Decay Ratio** $\zeta$ — the ratio of high-frequency to low-frequency energy. This per-band decomposition is genuinely uncomputable from spatial statistics: two blocks with identical total variance can have radically different $\zeta$ values. Combined with a query-aware logit upper bound, OrthoCache uses a **two-gate eviction criterion**: blocks must pass both a query-relevance gate and a spectral coherence gate.
 
 This paper makes the following contributions:
-1. **A query-aware spectral bound** that makes the Walsh-Hadamard transform load-bearing by using it to extract block alignment (DC) and bound the residual variance (AC).
-2. **A compilable TPU kernel** written in JAX/Pallas using a single-axis grid `(num_heads,)` and online softmax accumulation, resolving write-after-write races and block-local normalization bugs.
-3. **Formal proofs** of the Parseval identity and the exponential TV distance bound type-checked in Lean 4 with zero `sorry` stubs.
-4. **Empirical validation on Gemma 4 31B** on TPU v5e-8 showing zero bound violations and real latency crossover results.
+1. **A query-aware spectral bound** that uses the DC component for query alignment and the aggregate AC energy for residual bounding.
+2. **Multi-Band Sequency Filtering** with the Spectral Decay Ratio $\zeta = E_\text{high} / E_\text{low}$ — a query-independent entropy signature that distinguishes semantically coherent blocks from noise-dominated blocks, making the FWHT genuinely load-bearing.
+3. **A compilable TPU kernel** written in JAX/Pallas using a single-axis grid `(num_heads,)` and online softmax accumulation, with pre-matmul mask gating that zeros evicted k/v blocks before the dot product.
+4. **Formal proofs** of the Parseval identity and the exponential TV distance bound type-checked in Lean 4 with zero `sorry` stubs.
 
 ---
 
@@ -48,7 +48,30 @@ $$\sum_{i \in B_j} \|k_i - \mu_j\|_2^2 = \sum_{s > 0} \|\hat{K}_{j, s}\|_2^2 \tr
 For any token $i \in B_j$, the raw attention logit $z_i = q^T k_i / \sqrt{d_k}$ can be bounded via Cauchy-Schwarz:
 $$z_i = \frac{q^T \mu_j + q^T (k_i - \mu_j)}{\sqrt{d_k}} \leq \frac{q^T \hat{K}_{j, 0}}{\sqrt{b \cdot d_k}} + \frac{\|q\|_2}{\sqrt{d_k}} \sqrt{\frac{1}{b} \sum_{s > 0} \|\hat{K}_{j, s}\|_2^2} \triangleq \text{logit\_bound}_j$$
 
-We evict block $B_j$ if $\text{logit\_bound}_j < \tau$ for a threshold $\tau$. This resolves the Parseval no-op: the DC term provides query alignment, while the AC term bounds the residual, making the WHT essential for query-aware eviction.
+We evict block $B_j$ if $\text{logit\_bound}_j < \tau$ for a threshold $\tau$. This resolves the Parseval no-op for the query-aware bound: the DC term provides query alignment, while the AC term bounds the residual.
+
+### 2.1.1 Multi-Band Sequency Filtering
+
+The aggregate AC energy $E_{j, \text{AC}}$ collapses the non-DC spectrum into a single scalar. This scalar equals the spatial variance $\sum_{i \in B_j} \|k_i - \mu_j\|_2^2$ and is therefore computable without the FWHT — making the transform redundant for this quantity alone.
+
+To make the FWHT genuinely load-bearing, we partition the 512 Walsh coefficients into discrete **sequency bands**:
+
+| Band | Indices | Interpretation |
+|:-----|:--------|:---------------|
+| DC | 0 | Block mean |
+| Low-sequency | 1–63 | Smooth semantic trends |
+| Mid-sequency | 64–255 | Syntactic context |
+| High-sequency | 256–511 | Formatting noise |
+
+We define the **Spectral Decay Ratio** $\zeta_j = E_{j, \text{high}} / (E_{j, \text{low}} + \epsilon)$, where $E_{j, \text{high}}$ and $E_{j, \text{low}}$ are the sum of squared coefficients in the high and low bands respectively. High $\zeta$ indicates noise-dominated blocks; low $\zeta$ indicates coherent semantic structure.
+
+**Why $\zeta$ is uncomputable spatially:** Two blocks with identical $\sum \|k_i - \mu\|^2$ can have completely different $\zeta$ values — one block concentrates energy in low-sequency coefficients (coherent text), the other distributes it across all bands (formatting tokens). Only the FWHT exposes this distinction.
+
+OrthoCache retains block $B_j$ if and only if both gates pass:
+1. **Query-aware logit bound:** $\max_q \tau_j(q) \geq \tau$
+2. **Spectral coherence:** $\zeta_j \leq \zeta_{\max}$
+
+$\zeta$ is deliberately query-independent, computed once when the block enters the KV cache, and cached as a scalar metadata entry.
 
 ### 2.2 Truncation Bound
 
@@ -113,7 +136,9 @@ Because the kernel runs inside a single Pallas thread group per head, execution 
 
 ## 5. Conclusion
 
-OrthoCache resolves the Parseval no-op and attention misalignment limitations by introducing query-aware spectral eviction. By structuring the Pallas TPU kernel to utilize online softmax and a single-axis grid, we eliminate memory race conditions and softmax errors. The mathematical correctness is formally verified in Lean 4, and the empirical speedups on Gemma 4 31B on TPU v5e-8 confirm the viability of hardware-native KV-cache block eviction.
+OrthoCache resolves the Parseval no-op through Multi-Band Sequency Filtering. Rather than collapsing the Walsh-Hadamard spectrum into a redundant aggregate energy scalar, OrthoCache extracts per-band energy decompositions that distinguish semantically coherent blocks from noise-dominated blocks — a distinction impossible to make with spatial statistics alone. The Spectral Decay Ratio $\zeta$ provides a query-independent entropy signature computed once per block, while the query-aware logit bound provides dynamic, per-query relevance filtering. Together, these form a two-gate eviction criterion backed by a formally verified exponential TV distance bound.
+
+> **Limitations.** The current Pallas kernel provides correctness but not acceleration — it computes attention for all blocks and gates accumulation rather than skipping FLOPs. True hardware-level block skipping requires either `pl.when()` support in Pallas or an XLA HLO reindexing pass. The economic value projections assume this capability is realized.
 
 ---
 
