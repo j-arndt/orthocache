@@ -87,10 +87,13 @@ def _build_prompt(tokenizer: Any, seq_len: int) -> Any:
 
 
 def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarray]:
-    """Forward pass → (keys, values) each of shape (seq_len, num_heads, head_dim).
+    """Forward pass → (keys, values) each of shape (seq_len, num_kv_heads, head_dim).
 
-    Returns the *first intermediate* decoder layer (layer 1 if the model has
-    more than one layer, otherwise layer 0).
+    Handles both the modern ``DynamicCache`` API and legacy tuple format.
+
+    For hybrid sliding-window / global-attention models like Gemma 4, this
+    selects the **longest-cached layer** (a global-attention layer) since
+    those are the ones where KV-cache eviction is meaningful.
     """
     import torch
 
@@ -98,12 +101,24 @@ def _extract_kv_cache(model: Any, input_ids: Any) -> tuple[np.ndarray, np.ndarra
         outputs = model(input_ids, use_cache=True)
 
     past_kv = outputs.past_key_values
-    layer_idx = min(1, len(past_kv) - 1)
-    k_tensor = past_kv[layer_idx][0][0]  # (num_heads, seq_len, head_dim)
-    v_tensor = past_kv[layer_idx][1][0]
 
-    keys = k_tensor.permute(1, 0, 2).float().cpu().numpy()    # (seq, heads, dim)
-    values = v_tensor.permute(1, 0, 2).float().cpu().numpy()
+    # DynamicCache API (transformers >= 4.36, used by Gemma 4)
+    if hasattr(past_kv, "key_cache"):
+        # Find the layer with the longest cached sequence (global attention layer)
+        seq_lens = [past_kv.key_cache[i].shape[2] for i in range(len(past_kv.key_cache))]
+        layer_idx = int(np.argmax(seq_lens))
+        print(f"  Selected layer {layer_idx} (global attention, {seq_lens[layer_idx]} tokens cached)")
+
+        k = past_kv.key_cache[layer_idx][0]   # (num_kv_heads, seq_len, head_dim)
+        v = past_kv.value_cache[layer_idx][0]
+    else:
+        # Legacy tuple-of-tuples format
+        layer_idx = min(1, len(past_kv) - 1)
+        k = past_kv[layer_idx][0][0]
+        v = past_kv[layer_idx][1][0]
+
+    keys = k.permute(1, 0, 2).float().cpu().numpy()    # (seq, heads, dim)
+    values = v.permute(1, 0, 2).float().cpu().numpy()
     return keys, values
 
 

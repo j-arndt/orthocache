@@ -93,7 +93,15 @@ def _build_prompt(tokenizer: Any, seq_len: int) -> Any:
 def _extract_key_caches(model: Any, input_ids: Any) -> list[np.ndarray]:
     """Run a forward pass and return key tensors from every decoder layer.
 
-    Each returned array has shape ``(seq_len, num_heads, head_dim)``.
+    Handles both the modern ``DynamicCache`` API (transformers >= 4.36)
+    and the legacy tuple-of-tuples format.
+
+    Each returned array has shape ``(seq_len, num_kv_heads, head_dim)``.
+
+    For Gemma 4 (hybrid sliding-window + global attention), most layers
+    cache only 512 tokens (local window).  Global-attention layers cache
+    the full sequence.  We return **all** layers so the caller can see
+    the difference.
     """
     import torch
 
@@ -102,12 +110,22 @@ def _extract_key_caches(model: Any, input_ids: Any) -> list[np.ndarray]:
 
     past_kv = outputs.past_key_values
     key_arrays: list[np.ndarray] = []
-    for layer_kv in past_kv:
-        # layer_kv is a tuple (key, value); key shape: (batch, num_heads, seq_len, head_dim)
-        key_tensor = layer_kv[0][0]  # drop batch dim
-        # Transpose to (seq_len, num_heads, head_dim) to match OrthoCache convention
-        key_np = key_tensor.permute(1, 0, 2).float().cpu().numpy()
-        key_arrays.append(key_np)
+
+    # DynamicCache API (transformers >= 4.36, used by Gemma 4)
+    if hasattr(past_kv, "key_cache"):
+        for layer_idx in range(len(past_kv.key_cache)):
+            # shape: (batch, num_kv_heads, seq_len, head_dim)
+            k = past_kv.key_cache[layer_idx][0]  # drop batch
+            # -> (seq_len, num_kv_heads, head_dim)
+            key_np = k.permute(1, 0, 2).float().cpu().numpy()
+            key_arrays.append(key_np)
+    else:
+        # Legacy tuple-of-tuples format
+        for layer_kv in past_kv:
+            key_tensor = layer_kv[0][0]  # drop batch
+            key_np = key_tensor.permute(1, 0, 2).float().cpu().numpy()
+            key_arrays.append(key_np)
+
     return key_arrays
 
 
