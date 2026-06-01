@@ -149,6 +149,61 @@ $$z_i < \beta$$
 
 ---
 
+## 3.1 Query-Aware Spectral Eviction (DC/AC Decomposition)
+
+The energy-based bound in §2–§3 is **conservative**: it treats all queries identically, bounding every evicted logit by a single worst-case $\beta$ that depends on $\|q\|_2$ and total block energy $\epsilon$. In practice, different blocks interact very differently with different queries. The **query-aware spectral eviction** method, implemented in `spectral_energy.py`, uses the Walsh–Hadamard spectral decomposition to derive a tighter, per-block, per-query logit upper bound.
+
+### Key Decomposition
+
+Given a key block $K_{B_j} \in \mathbb{R}^{b \times d_k}$ and its FWHT $\hat{K}_j = \mathcal{H}_b \cdot K_{B_j}$, we decompose the spectral coefficients into:
+
+- **DC component** (frequency 0): $\hat{K}_{j,0} = \sum_{i \in B_j} k_i / \sqrt{b}$ — proportional to the block mean
+- **AC components** (frequencies $s > 0$): $\hat{K}_{j,s}$ for $s = 1, \ldots, b-1$ — encoding intra-block variance
+
+The block mean vector is:
+$$\bar{k}_j = \frac{\hat{K}_{j,0}}{\sqrt{b}} = \frac{1}{b}\sum_{i \in B_j} k_i$$
+
+The AC energy captures the total squared deviation of keys from the block mean:
+$$E_j^{\text{AC}} = \sum_{s=1}^{b-1} \sum_{d=1}^{d_k} |\hat{K}_{j,s,d}|^2 = \sum_{i \in B_j} \|k_i - \bar{k}_j\|_2^2$$
+
+where the last equality follows from Parseval's identity applied to the centered key vectors.
+
+### Query-Aware Logit Upper Bound
+
+For a query $q$ and any key $k_i \in B_j$, write $k_i = \bar{k}_j + (k_i - \bar{k}_j)$ and decompose the logit:
+
+$$z_i = \frac{q^T k_i}{\sqrt{d_k}} = \underbrace{\frac{q^T \bar{k}_j}{\sqrt{d_k}}}_{\text{alignment}} + \underbrace{\frac{q^T(k_i - \bar{k}_j)}{\sqrt{d_k}}}_{\text{residual}}$$
+
+The alignment term is constant across the block. The residual is bounded by Cauchy–Schwarz:
+
+$$\left|\frac{q^T(k_i - \bar{k}_j)}{\sqrt{d_k}}\right| \leq \frac{\|q\|_2 \cdot \|k_i - \bar{k}_j\|_2}{\sqrt{d_k}} \leq \frac{\|q\|_2 \cdot \sqrt{E_j^{\text{AC}}}}{\sqrt{d_k}}$$
+
+where the last inequality uses $\|k_i - \bar{k}_j\|_2^2 \leq \sum_{i'} \|k_{i'} - \bar{k}_j\|_2^2 = E_j^{\text{AC}}$.
+
+The **query-aware logit upper bound** for block $B_j$ is therefore:
+
+$$\tau_j(q) = \frac{q^T \bar{k}_j}{\sqrt{d_k}} + \frac{\|q\|_2 \sqrt{E_j^{\text{AC}}}}{\sqrt{d_k}}$$
+
+### Why This Is Strictly Tighter
+
+The energy-based bound (§3) yields $|z_i| < \beta = \|q\|_2 \sqrt{E_j} / \sqrt{d_k}$ using the total block energy $E_j = E_j^{\text{DC}} + E_j^{\text{AC}}$. The query-aware bound replaces the crude $\|q\|_2 \sqrt{E_j}$ with:
+1. The actual **signed alignment** $q^T \bar{k}_j$ (which can be strongly negative when the block mean opposes the query), plus
+2. A **residual** that depends only on the AC energy $E_j^{\text{AC}} \leq E_j$.
+
+This makes the FWHT **load-bearing**: the DC/AC split uses spectral information that raw block-energy thresholding discards. Blocks with large total energy but poor query alignment (negative $q^T \bar{k}_j$) are correctly identified as evictable — something the energy-only bound cannot do.
+
+### Eviction Criterion
+
+Given a threshold $\tau$, block $B_j$ is **evicted** if:
+
+$$\max_{q \in Q} \tau_j(q) < \tau$$
+
+where the max is taken over query tokens $Q$ to ensure that any block important to *any* query is retained. The truncation bound (§5) then applies with $\tau$ replacing $\beta$:
+
+$$\text{TV}(\alpha, \hat{\alpha}) \leq |S^c| \cdot \exp(\tau - z_{\max})$$
+
+---
+
 ## 4. Total Variation Bound (The Core Theorem)
 
 Let $S$ be the set of retained token indices and $S^c$ the set of evicted token indices. We define:
@@ -207,6 +262,12 @@ This completes the proof of the **OrthoCache Truncation Bound**:
 
 $$\boxed{\text{TV}(\alpha, \hat{\alpha}) \leq |S^c| \cdot \exp\!\left(\frac{\|q\|_2\sqrt{\epsilon}}{\sqrt{d_k}} - z_{\max}\right)}$$
 
+With the query-aware spectral eviction (§3.1), $\beta$ is replaced by the tighter query-aware threshold $\tau$:
+
+$$\boxed{\text{TV}(\alpha, \hat{\alpha}) \leq |S^c| \cdot \exp(\tau - z_{\max})}$$
+
+where $\tau$ is the query-aware logit upper bound used for eviction. Since $\tau \leq \beta$ in all cases where the alignment term is non-positive, the query-aware bound is strictly tighter.
+
 **Dual reading of the bound:**
 
 1. **Algebraic:** The TV distance decays exponentially in the gap $(z_{\max} - \beta)$. In practice, $z_{\max}$ ranges from 5–15 (pre-softmax peak for important tokens) while $\beta$ is near zero for reasonable $\epsilon$, yielding negligible TV distances.
@@ -236,11 +297,16 @@ The geometric framework reveals why OrthoCache and TurboAngle are **synergistic,
 [ Invariant Detection ] ──> Spectral Energy via FWHT (Chow Influence Maps)
                                   │
                                   │  E_j = ||K̂_j||²_F = Σ||k_i||² (Parseval)
-                                  │  Low E_j ↔ inert region ↔ negligible influence
+                                  │  DC/AC split: alignment + residual bound
+                                  ▼
+[ Query-Aware Eviction] ──> τ_j(q) = q·k̄_j/√d + ||q||·√E_AC/√d
+                                  │
+                                  │  Per-block, per-query logit upper bound
+                                  │  Evict block j if max_q τ_j(q) < τ
                                   ▼
 [ Formal Guarantee ]    ──> OrthoCache Truncation Bound (Theorem)
                                   │
-                                  │  TV(α, α̂) ≤ |S^c| · exp(β - z_max)
+                                  │  TV(α, α̂) ≤ |S^c| · exp(τ - z_max)
                                   │  Exponential decay in logit gap
                                   ▼
 [ Hardware Execution ]  ──> Pallas Scalar Prefetch Block Eviction

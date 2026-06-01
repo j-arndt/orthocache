@@ -28,19 +28,21 @@ The mathematical safety of this truncation is **formally proven**: the Total Var
 ```mermaid
 flowchart LR
     A["KV-Cache Blocks<br/><i>bfloat16 · 512-tile aligned</i>"] --> B["FWHT<br/><i>in-register · O(b log b)</i>"]
-    B --> C["Spectral Energy<br/><i>‖Ĥ·K‖²_F per block</i>"]
-    C --> D["Threshold Mask<br/><i>E_j < ε → evict</i>"]
-    D --> E["SMEM<br/><i>block-sparse index</i>"]
-    E --> F["Pallas Sparse<br/>Attention Kernel"]
-    F --> G["Output"]
+    B --> C["DC / AC Split<br/><i>block mean + variance</i>"]
+    C --> D["Query-Aware Bounds<br/><i>τ_j = q·k̄ + ‖q‖√E_AC</i>"]
+    D --> E["Threshold Mask<br/><i>τ_j < τ → evict</i>"]
+    E --> F["SMEM<br/><i>block-sparse index</i>"]
+    F --> G["Pallas Sparse<br/>Attention Kernel"]
+    G --> H["Output"]
 
     style A fill:#1a1a2e,stroke:#e94560,color:#eee
     style B fill:#16213e,stroke:#0f3460,color:#eee
     style C fill:#16213e,stroke:#0f3460,color:#eee
     style D fill:#1a1a2e,stroke:#e94560,color:#eee
-    style E fill:#0f3460,stroke:#53a8b6,color:#eee
+    style E fill:#1a1a2e,stroke:#e94560,color:#eee
     style F fill:#0f3460,stroke:#53a8b6,color:#eee
-    style G fill:#1a1a2e,stroke:#e94560,color:#eee
+    style G fill:#0f3460,stroke:#53a8b6,color:#eee
+    style H fill:#1a1a2e,stroke:#e94560,color:#eee
 ```
 
 ───────────────────────────────────────────────────────────────────────
