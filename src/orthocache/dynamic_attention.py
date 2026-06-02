@@ -110,8 +110,8 @@ def dynamic_multihead_attention(
 ) -> jax.Array:
     """Full multi-head attention with dynamic compaction and while_loop.
     
-    This is the drop-in replacement for compile_pallas_sparse_attention
-    that achieves true dynamic loop elision on TPU.
+    Uses a UNIFIED num_active across all heads (any-head retention) so
+    we can vmap the while_loop kernel across heads for parallel execution.
     
     Args:
         q: Query (seq_len_q, num_heads, head_dim).
@@ -127,39 +127,44 @@ def dynamic_multihead_attention(
     seq_len_k = keys.shape[0]
     num_blocks = seq_len_k // block_size
     
-    def per_head(h):
-        """Process a single attention head."""
-        q_h = q[:, h, :]       # (seq_len_q, head_dim)
-        k_h = keys[:, h, :]    # (seq_len_k, head_dim)
-        v_h = values[:, h, :]  # (seq_len_k, head_dim)
-        mask_h = block_mask[:, h]  # (num_blocks,) boolean
-        
-        # Stream compaction for this head:
-        # Sort blocks so active ones come first
-        active_int = mask_h.astype(jnp.int32)
-        num_active = jnp.sum(active_int)
-        sort_order = jnp.argsort(-active_int, stable=True)
-        
-        # Reshape into blocks, gather, flatten back
-        k_blocked = k_h.reshape(num_blocks, block_size, head_dim)
-        v_blocked = v_h.reshape(num_blocks, block_size, head_dim)
-        
-        compact_k = k_blocked[sort_order].reshape(num_blocks * block_size, head_dim)
-        compact_v = v_blocked[sort_order].reshape(num_blocks * block_size, head_dim)
-        
-        # Run dynamic attention with while_loop
-        out_h = dynamic_compact_attention(
-            q_h, compact_k, compact_v, num_active, block_size=block_size
+    # Unified mask: retain block if ANY head says retain
+    block_active = jnp.any(block_mask, axis=-1)  # (num_blocks,)
+    active_int = block_active.astype(jnp.int32)
+    num_active = jnp.sum(active_int)
+    
+    # Sort order: active blocks first (stable preserves relative order)
+    sort_order = jnp.argsort(-active_int, stable=True)  # (num_blocks,)
+    
+    # Compact ALL heads at once using the unified sort order
+    # keys: (seq_len_k, num_heads, head_dim) → (num_blocks, block_size, num_heads, head_dim)
+    k_blocked = keys.reshape(num_blocks, block_size, num_heads, head_dim)
+    v_blocked = values.reshape(num_blocks, block_size, num_heads, head_dim)
+    
+    compact_k = k_blocked[sort_order]  # (num_blocks, block_size, num_heads, head_dim)
+    compact_v = v_blocked[sort_order]
+    
+    # Transpose to (num_heads, num_blocks * block_size, head_dim) for vmap
+    compact_k_flat = compact_k.reshape(num_blocks * block_size, num_heads, head_dim)
+    compact_v_flat = compact_v.reshape(num_blocks * block_size, num_heads, head_dim)
+    
+    # (num_heads, seq_len_k, head_dim)
+    compact_k_heads = jnp.transpose(compact_k_flat, (1, 0, 2))
+    compact_v_heads = jnp.transpose(compact_v_flat, (1, 0, 2))
+    
+    # q: (seq_len_q, num_heads, head_dim) → (num_heads, seq_len_q, head_dim)
+    q_heads = jnp.transpose(q, (1, 0, 2))
+    
+    # vmap dynamic_compact_attention over the head dimension
+    # Each head gets the same num_active (unified mask)
+    vmapped_attn = jax.vmap(
+        lambda q_h, k_h, v_h: dynamic_compact_attention(
+            q_h, k_h, v_h, num_active, block_size=block_size
         )
-        return out_h  # (seq_len_q, head_dim)
+    )
     
-    # Process all heads
-    # Note: We use a Python loop here because vmap over dynamic while_loop
-    # bounds (num_active varies per head) requires careful handling.
-    # For production, this should use vmap with a unified num_active.
-    outputs = []
-    for h in range(num_heads):
-        outputs.append(per_head(h))
+    # (num_heads, seq_len_q, head_dim)
+    out_heads = vmapped_attn(q_heads, compact_k_heads, compact_v_heads)
     
-    # Stack: list of (seq_len_q, head_dim) → (seq_len_q, num_heads, head_dim)
-    return jnp.stack(outputs, axis=1)
+    # Transpose back: (num_heads, seq_len_q, head_dim) → (seq_len_q, num_heads, head_dim)
+    return jnp.transpose(out_heads, (1, 0, 2))
+
