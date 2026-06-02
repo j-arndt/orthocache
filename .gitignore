@@ -41,12 +41,46 @@ proofs/.lake/
 proofs/lake-packages/
 proofs/build/
 
-# Benchmarks output
+# Benchmarks output (regenerable)
 benchmarks/plots/*.png
 benchmarks/plots/*.svg
 benchmarks/plots/*.pdf
-*.xprof
 
 # JAX
 *.npy
 *.npz
+*.xprof
+
+# ── Dev artifacts (not for publication) ──────────────────────────────
+initial-discussion.txt
+Deep Dive*.md
+implementation_plan*.md
+task.md
+config*.json
+update_notebook.py
+build_v4_notebook.py
+
+# ZIP archives (results live in benchmarks/)
+*.zip
+
+# Root-level notebooks (canonical version lives in notebooks/)
+/orthocache-v*.ipynb
+
+# Old result directories (duplicated in benchmarks/)
+/orthocache_profiling/
+/orthocache_results/
+/orthocache_v5_31b_results/
+
+# Deep research (internal working docs)
+/deepresearch/
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.toc

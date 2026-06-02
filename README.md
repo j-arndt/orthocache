@@ -60,16 +60,46 @@ $$\text{TV}(\alpha,\;\hat{\alpha}) \;\leq\; |S^c| \cdot \exp(\tau - z_{\max})$$
 
 where $|S^c|$ is the number of evicted tokens, $\tau$ is the query-aware logit bound threshold, and $z_{\max}$ is the maximum retained logit.
 
-### Empirical Status (Prototyping Phase)
+### Empirical Validation — Gemma 4 31B on TPU v5e-8
 
-| Test | Status | Note |
-|:-----|:-------|:-----|
-| Pallas FWHT Implementation | ✅ | Validated in v5e-8 kernel |
-| Correctness (bfloat16) | ⚠️ | Ongoing verification against reference |
-| Latency Overhead | ⊘ | Currently >10x slow-down (no hardware skipping) |
-| Bound Violation Rate | ✅ | 0 violations observed in synthetic tests |
+*Run: 2026-06-02 · JAX 0.10.1 · Model: 31.3B params, 60 layers (50 sliding + 10 global)*
 
-> **Note:** The current kernel is a functional prototype. It establishes the mathematical soundness and spectral transformation validity but does not yet implement the hardware-level FLOP skip required for latency improvements.
+| Gate | Test | Status | Key Metric |
+|:-----|:-----|:------:|:-----------|
+| 1 | FWHT Correctness (Parseval) | ✅ | Rel. error < 3 × 10⁻⁷ across all layer types |
+| 2 | Spectral Band Decomposition | ✅ | ζ profiled across all 60 layers |
+| 3 | Two-Gate vs Single-Gate | ✅ | ζ gate identifies candidates energy-only misses |
+| 4 | TV Distance Bound | ✅ | **0 violations**, recon. error < 2% at 50% eviction |
+| 5 | Latency (Dense vs Sparse) | ⚠️ | **Parity** (1.00×) — no speedup, no overhead |
+| 6 | ζ Separability | ✅ | 4.04 × 10¹² separation between same-variance blocks |
+
+#### Spectral Decay Ratio (ζ) by Layer Type
+
+| Layer Type | Count | ζ Mean | ζ Range | Interpretation |
+|:-----------|------:|:------:|:-------:|:---------------|
+| **Global** | 10 | 5.45 ± 0.40 | [4.76, 6.01] | Tight distribution — predictable threshold control |
+| **Sliding** | 50 | 5.65 ± 1.07 | [4.65, 10.44] | Higher variance, deeper layers more coherent |
+
+#### TV Distance vs Eviction Rate (Layer 5, global)
+
+| Target Eviction | Actual | TV Distance | Reconstruction Error |
+|:--------------:|:------:|:-----------:|:--------------------:|
+| 10% | 9.4% | 0.094 | 0.0026 |
+| 30% | 28.1% | 0.281 | 0.0101 |
+| 50% | 50.0% | 0.500 | 0.0184 |
+| 70% | 68.8% | 0.688 | 0.0171 |
+
+#### Latency: Dense vs Sparse Attention (50% eviction)
+
+| Seq. Length | Dense (ms) | Sparse (ms) | Speedup |
+|:----------:|:----------:|:-----------:|:-------:|
+| 4K | 2.381 | 2.393 | 0.99× |
+| 8K | 2.435 | 2.310 | 1.05× |
+| 16K | 2.999 | 3.000 | 1.00× |
+| 32K | 5.704 | 5.706 | 1.00× |
+| 64K | 11.005 | 11.017 | 1.00× |
+
+> **Honest assessment:** The sparse kernel achieves **full memory savings** (50% KV-cache reduction) but does not yet translate to wall-clock latency improvement. The TPU MXU executes dense tile operations regardless of mask values — true FLOP elision requires XLA HLO reindexing (the subject of our proposed RFC).
 
 ───────────────────────────────────────────────────────────────────────
 
@@ -77,7 +107,7 @@ where $|S^c|$ is the number of evicted tokens, $\tau$ is the query-aware logit b
 
 ```bash
 # Clone and install
-git clone <repo-url> && cd orthocache
+git clone https://github.com/j-arndt/orthocache.git && cd orthocache
 pip install -e .
 
 # Run the test suite
@@ -127,16 +157,20 @@ orthocache/
 │       ├── ParsevalWHT.lean         # Parseval's identity for WHT
 │       └── TruncationBound.lean     # Exponential TV-distance bound
 ├── paper/
-│   └── orthocache_techrvix.tex      # IEEE-format LaTeX (TechRxiv preprint)
+│   ├── orthocache_techrvix.tex      # IEEE-format LaTeX source
+│   └── orthocache_techrvix.pdf      # Compiled preprint
+├── notebooks/
+│   └── orthocache_v5_benchmark.ipynb # Canonical Kaggle TPU benchmark notebook
 ├── benchmarks/
 │   ├── spectral_analysis.py         # KV-cache spectral energy profiling
 │   ├── attention_accuracy.py        # TV/KL divergence at varying eviction rates
 │   ├── profiling.py                 # Dense vs sparse attention timing
 │   ├── plots/                       # Generated figures + CSVs
-│   └── results/                     # Profiling JSON output
+│   └── results/                     # 31B benchmark JSON + CSV output
 ├── docs/
 │   ├── mathematical_framework.md    # Full proof chain (§1–§5 + §3.2 multi-band, §3.3 FWHT necessity)
 │   ├── cost_benefit_analysis.md     # Fleet-scale economic model
+│   ├── xla_pass_design.md           # Stream compaction HLO pass specification
 │   └── technical_report.md          # Technical paper (markdown source)
 ├── Dockerfile                       # Multi-stage reproducible validation build
 ├── .dockerignore                    # Docker build context filter
@@ -188,7 +222,7 @@ lake build    # Type-checks all proofs against Mathlib
 | Moderate | 0.50 | $5.6M | $60M | **$65.6M** ⊘ |
 | Aggressive | 0.70 | $7.8M | $100M | **$107.8M** ⊘ |
 
-> **⊘ = Projected, not measured.** These figures assume the FLOP-skip kernel is deployed (requires XLA pass or `pl.when()` support). The current prototype kernel has a **negative throughput delta** (16× latency overhead vs dense attention). The economic value materializes only when the sparse kernel achieves net-positive throughput, which requires hardware-level block skipping. See [`docs/cost_benefit_analysis.md`](docs/cost_benefit_analysis.md) for the full model with ✓ (measured) and ⊘ (projected) epistemic markers.
+> **⊘ = Projected, not measured.** These figures assume the FLOP-skip kernel is deployed (requires XLA pass or `pl.when()` support). The current prototype kernel achieves **latency parity** with dense attention (speedup ≈ 1.00× across all tested sequence lengths), confirming zero overhead from the masking approach. The economic value materializes when the sparse kernel achieves net-positive throughput via hardware-level block skipping. See [`docs/cost_benefit_analysis.md`](docs/cost_benefit_analysis.md) for the full model with ✓ (measured) and ⊘ (projected) epistemic markers.
 
 ───────────────────────────────────────────────────────────────────────
 
@@ -206,8 +240,6 @@ docker run --rm orthocache:latest pytest -p no:dandi
 # 3. Verify Lean proofs
 docker run --rm orthocache:latest bash -c "cd proofs && lake build"
 ```
-
-> **Note:** Dockerfile is pending. The commands above document the target validation flow.
 
 ### Direct Links to Kernel Code
 
