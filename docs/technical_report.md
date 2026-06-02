@@ -144,6 +144,9 @@ OrthoCache resolves the Parseval no-op through Multi-Band Sequency Filtering. Ra
 
 ## References
 
-[1] Google DeepMind. TurboQuant: Quantized KV-cache for efficient inference. Internal report, 2025.  
-[2] Zhang, Z., et al. H₂O: Heavy-Hitter Oracle for efficient generative inference of large language models. *NeurIPS*, 2023.  
-[3] Xiao, G., et al. Efficient streaming language models with attention sinks. *ICLR*, 2024.  
+[1] A. Zandieh, M. Daliri, M. Hadian, and V. Mirrokni. TurboQuant: Online vector quantization with near-optimal distortion rate. *arXiv:2504.19874*, 2025.  
+[2] Z. Zhang, et al. H₂O: Heavy-Hitter Oracle for efficient generative inference of large language models. *NeurIPS*, 2023.  
+[3] G. Xiao, et al. Efficient streaming language models with attention sinks. *ICLR*, 2024.  
+[4] A. Zandieh, et al. OCTOPUS: Optimized KV cache for Transformers via octahedral parametrization under optimal squared error quantization. *arXiv:2605.21226*, 2025.  
+[5] D. Zhu, et al. Adamas: Hadamard sparse attention for efficient long-context inference. *arXiv:2510.18413*, 2024.  
+

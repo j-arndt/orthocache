@@ -623,7 +623,10 @@ More importantly, this architecture demonstrates the first successful translatio
 
 \textbf{KV-Cache Compression.}
 TurboQuant~\cite{turboquant} applies mixed-precision quantization to the
-KV-cache, achieving 2--4$\times$ memory reduction. KIVI~\cite{kivi} introduces
+KV-cache, achieving 2--4$\times$ memory reduction.
+OCTOPUS~\cite{octopus} extends this paradigm with octahedral parametrization
+for joint triplet quantization of rotation-preconditioned coordinates.
+KIVI~\cite{kivi} introduces
 per-channel key quantization with per-token value quantization. These methods
 are orthogonal to OrthoCache: quantization reduces \emph{per-token} storage
 while our approach reduces the \emph{number of tokens} in the pipeline.
@@ -640,6 +643,11 @@ BigBird~\cite{bigbird} and Longformer~\cite{longformer} impose fixed sparse
 attention patterns (local + global windows). These are static and
 content-independent. OrthoCache's spectral filtering is content-adaptive:
 the eviction set depends on the actual information content of each block.
+Adamas~\cite{adamas} applies Hadamard transforms with bucketization and 2-bit
+compression for top-$k$ token selection via Manhattan-distance estimation.
+While Adamas operates at per-token granularity during the attention kernel,
+OrthoCache evicts at block granularity \emph{before} attention is computed,
+using spectral band decomposition rather than compressed similarity search.
 
 \textbf{Walsh--Hadamard in ML.}
 QuaRot~\cite{quarot} uses randomized Hadamard rotations to flatten activation
@@ -765,6 +773,17 @@ A.~Tseng, J.~Chee, Q.~Sun, V.~Kuleshov, and C.~De~Sa,
 ``QuIP\#: Even better LLM quantization with Hadamard incoherence and
 lattice codebooks,''
 in \emph{Proc.\ ICML}, 2024.
+
+\bibitem{octopus}
+A.~Zandieh, M.~Daliri, M.~Hadian, and V.~Mirrokni,
+``OCTOPUS: Optimized KV cache for Transformers via octahedral parametrization
+under optimal squared error quantization,''
+arXiv preprint arXiv:2605.21226, 2025.
+
+\bibitem{adamas}
+D.~Zhu, C.~Li, Z.~Chen, B.~Yuan, and J.~Zhao,
+``Adamas: Hadamard sparse attention for efficient long-context inference,''
+arXiv preprint arXiv:2510.18413, 2024.
 
 \end{thebibliography}
 

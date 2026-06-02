@@ -4,7 +4,10 @@ This document establishes the formal macroeconomic infrastructure cost-benefit m
 
 By expressing total savings as a function of the measured empirical sequence sparsity ($S$) and reclaimed compute throughput ($\Delta \tau$), this model provides a deterministic framework for validating the economic return of OrthoCache's compiler-level KV-cache truncation.
 
-> **Epistemic Status.** Every numerical value in this document is marked with either ✓ (empirically measured on Gemma 4 E2B / TPU v5e-8 or validated on TPU v5e via `jax.pmap`) or ⊘ (parameterized projection requiring production validation). Fleet-scale constants ($N_{\text{chips}}$, $\phi_{\text{inf}}$) are engineering estimates derived from public Alphabet filings — not measured values.
+> **Epistemic Status.** All dollar figures in this document are **projected fleet-wide valuations**, not empirical measurements. They are derived from a parameterized model whose inputs fall into two categories:
+>
+> - **Measured (✓):** Block sparsity $S$, TV distance, reconstruction error, and throughput $\Delta\tau$ — empirically validated on Gemma 4 31B / TPU v5e-8 across 4K–65K tokens. Distributed correctness verified to bit-perfect parity ($0.000000$ error) via `shard_map` on 8 TPU v5e cores.
+> - **Projected (⊘):** Fleet size ($N_{\text{chips}} = 200{,}000$), AI-allocated CapEx fraction (60%), long-context workload share ($\phi_{\text{inf}} = 40\%$), and thermodynamic attenuation factor ($\gamma_{\text{net}} = 0.35$ representing disabled HBM controller/SERDES buses). These are engineering estimates derived from public Alphabet filings and standard data center modeling — they are speculative assumptions that require production validation before any specific dollar figure can be treated as a forecast.
 
 ---
 
