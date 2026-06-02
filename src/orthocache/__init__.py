@@ -14,4 +14,5 @@ from orthocache.spectral_energy import (
 )
 from orthocache.sparse_attention import jax_block_sparse_attention, compile_pallas_sparse_attention
 from orthocache.compaction import stream_compact, stream_decompact, compact_and_attend
+from orthocache.partitioning import orthocache_attention_partitioned
 from orthocache.pipeline import orthocache_forward

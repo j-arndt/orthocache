@@ -133,11 +133,15 @@ def orthocache_forward(
     t_attn = time.perf_counter()
     
     if mode == 'compact':
-        output, compact_meta = compact_and_attend(
-            q, keys, values, block_mask, block_size
+        # Phase C: User-space Stream Compaction
+        # Import the partitioned wrapper to support multi-device execution
+        from orthocache.partitioning import orthocache_attention_partitioned
+        
+        output = orthocache_attention_partitioned(
+            q, keys, values, block_mask, block_size=block_size
         )
         metadata.update({
-            'compact_num_active': int(compact_meta['num_active']),
+            'compact_num_active': int(blocks_retained),
         })
     elif mode == 'sparse':
         output = compile_pallas_sparse_attention(
