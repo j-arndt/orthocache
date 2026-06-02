@@ -3,7 +3,8 @@
     "timestamp": "2026-06-02T00:22:03.578108Z",
     "jax_version": "0.10.1",
     "device_count": 8,
-    "device_kind": "TPU v5 lite",
+    "device_kind": "TPU v5e",
+    "device_kind_note": "JAX runtime reports 'TPU v5 lite'; actual Kaggle hardware is TPU v5e-8 (8 chips, 128 GB HBM)",
     "backend": "tpu",
     "notebook_version": "v4-postfix",
     "commit_hash": "inlined-post-p1-p8"

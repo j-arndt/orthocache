@@ -1,6 +1,6 @@
 """OrthoCache: Hardware-Native Spectral Energy Thresholding Governor for TPU KV-Cache Optimization."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from orthocache.fwht import fwht_512
 from orthocache.spectral_energy import (
@@ -16,3 +16,9 @@ from orthocache.sparse_attention import jax_block_sparse_attention, compile_pall
 from orthocache.compaction import stream_compact, stream_decompact, compact_and_attend
 from orthocache.partitioning import orthocache_attention_partitioned
 from orthocache.pipeline import orthocache_forward
+from orthocache.indirect_attention import indirect_attention, indirect_attention_fori
+from orthocache.adaptive_attention import adaptive_sparse_attention
+from orthocache.alltoallv import alltoallv_kv_exchange
+from orthocache.distributed_attention import distributed_orthocache_attention
+from orthocache.ici_bandwidth_model import ici_bytes_per_step, ici_bandwidth_table, model_configs
+

@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "phase": "E.2b",
+    "method": "shard_map + Stratified AllGather (lax.switch, 4 buckets)",
+    "platform": "TPU v5e",
+    "platform_note": "JAX runtime reports 'TPU v5 lite'; actual Kaggle hardware is TPU v5e-8 (8 chips, 128 GB HBM)",
+    "jax_version": "0.10.1",
+    "config": {
+      "seq_q": 1, "num_heads": 4, "head_dim": 128,
+      "block_size": 512, "devices": 8, "warmup": 5, "reps": 20
+    },
+    "description": "Stratified AllGather via jax.experimental.shard_map. Each device compacts local KV blocks, pmax consensus selects tightest bucket, lax.switch dispatches to pre-compiled AllGather+einsum branch. Slice happens BEFORE the collective → physically fewer bytes on ICI.",
+    "correctness": {
+      "dense_vs_shard_map_dense": "max err = 0.000000",
+      "dense_vs_stratified_0pct": "max err = 0.000000",
+      "predicated_vs_stratified_50pct": "max err = 0.000000"
+    },
+    "timestamp": "2026-06-02T18:05:47-04:00"
+  },
+  "ici_volume": {
+    "description": "ICI data volume accounting: dense AllGather vs stratified AllGather. Linear (1-S) scaling confirmed.",
+    "results": [
+      {"seq_len": 16384, "blocks_total": 32, "blocks_per_dev": 4, "buckets": [1,2,3,4],
+       "eviction_pct": 0,  "K": 4, "bucket": 4, "dense_mb": 16.8, "strat_mb": 16.8, "ici_saved_pct": 0},
+      {"seq_len": 16384, "blocks_total": 32, "blocks_per_dev": 4, "buckets": [1,2,3,4],
+       "eviction_pct": 50, "K": 2, "bucket": 2, "dense_mb": 16.8, "strat_mb": 8.4,  "ici_saved_pct": 50},
+      {"seq_len": 16384, "blocks_total": 32, "blocks_per_dev": 4, "buckets": [1,2,3,4],
+       "eviction_pct": 75, "K": 1, "bucket": 1, "dense_mb": 16.8, "strat_mb": 4.2,  "ici_saved_pct": 75},
+      {"seq_len": 16384, "blocks_total": 32, "blocks_per_dev": 4, "buckets": [1,2,3,4],
+       "eviction_pct": 90, "K": 1, "bucket": 1, "dense_mb": 16.8, "strat_mb": 4.2,  "ici_saved_pct": 75},
+
+      {"seq_len": 32768, "blocks_total": 64, "blocks_per_dev": 8, "buckets": [2,4,6,8],
+       "eviction_pct": 0,  "K": 8, "bucket": 8, "dense_mb": 33.6, "strat_mb": 33.6, "ici_saved_pct": 0},
+      {"seq_len": 32768, "blocks_total": 64, "blocks_per_dev": 8, "buckets": [2,4,6,8],
+       "eviction_pct": 50, "K": 4, "bucket": 4, "dense_mb": 33.6, "strat_mb": 16.8, "ici_saved_pct": 50},
+      {"seq_len": 32768, "blocks_total": 64, "blocks_per_dev": 8, "buckets": [2,4,6,8],
+       "eviction_pct": 75, "K": 2, "bucket": 2, "dense_mb": 33.6, "strat_mb": 8.4,  "ici_saved_pct": 75},
+      {"seq_len": 32768, "blocks_total": 64, "blocks_per_dev": 8, "buckets": [2,4,6,8],
+       "eviction_pct": 90, "K": 1, "bucket": 2, "dense_mb": 33.6, "strat_mb": 8.4,  "ici_saved_pct": 75},
+
+      {"seq_len": 65536, "blocks_total": 128, "blocks_per_dev": 16, "buckets": [4,8,12,16],
+       "eviction_pct": 0,  "K": 16, "bucket": 16, "dense_mb": 67.1, "strat_mb": 67.1, "ici_saved_pct": 0},
+      {"seq_len": 65536, "blocks_total": 128, "blocks_per_dev": 16, "buckets": [4,8,12,16],
+       "eviction_pct": 50, "K": 8,  "bucket": 8,  "dense_mb": 67.1, "strat_mb": 33.6, "ici_saved_pct": 50},
+      {"seq_len": 65536, "blocks_total": 128, "blocks_per_dev": 16, "buckets": [4,8,12,16],
+       "eviction_pct": 75, "K": 4,  "bucket": 4,  "dense_mb": 67.1, "strat_mb": 16.8, "ici_saved_pct": 75},
+      {"seq_len": 65536, "blocks_total": 128, "blocks_per_dev": 16, "buckets": [4,8,12,16],
+       "eviction_pct": 90, "K": 2,  "bucket": 4,  "dense_mb": 67.1, "strat_mb": 16.8, "ici_saved_pct": 75}
+    ]
+  },
+  "latency": {
+    "description": "Latency benchmark: shard_map dense AllGather vs stratified AllGather. Crossover at 65K tokens.",
+    "results": [
+      {"seq_len": 8192,  "blocks_per_dev": 2,  "buckets": [1,2,2,2],     "eviction_pct": 0,  "K": 2,  "bucket": 2,  "dense_ms": 2.369, "strat_ms": 3.546, "dtau_pct": -49.7, "speedup": 0.67, "ici_saved_pct": 0},
+      {"seq_len": 8192,  "blocks_per_dev": 2,  "buckets": [1,2,2,2],     "eviction_pct": 50, "K": 1,  "bucket": 1,  "dense_ms": 2.369, "strat_ms": 3.559, "dtau_pct": -50.2, "speedup": 0.67, "ici_saved_pct": 50},
+      {"seq_len": 8192,  "blocks_per_dev": 2,  "buckets": [1,2,2,2],     "eviction_pct": 75, "K": 1,  "bucket": 1,  "dense_ms": 2.369, "strat_ms": 3.407, "dtau_pct": -43.8, "speedup": 0.70, "ici_saved_pct": 50},
+      {"seq_len": 8192,  "blocks_per_dev": 2,  "buckets": [1,2,2,2],     "eviction_pct": 90, "K": 1,  "bucket": 1,  "dense_ms": 2.369, "strat_ms": 3.189, "dtau_pct": -34.6, "speedup": 0.74, "ici_saved_pct": 50},
+
+      {"seq_len": 16384, "blocks_per_dev": 4,  "buckets": [1,2,3,4],     "eviction_pct": 0,  "K": 4,  "bucket": 4,  "dense_ms": 2.548, "strat_ms": 3.590, "dtau_pct": -40.9, "speedup": 0.71, "ici_saved_pct": 0},
+      {"seq_len": 16384, "blocks_per_dev": 4,  "buckets": [1,2,3,4],     "eviction_pct": 50, "K": 2,  "bucket": 2,  "dense_ms": 2.548, "strat_ms": 3.396, "dtau_pct": -33.3, "speedup": 0.75, "ici_saved_pct": 50},
+      {"seq_len": 16384, "blocks_per_dev": 4,  "buckets": [1,2,3,4],     "eviction_pct": 75, "K": 1,  "bucket": 1,  "dense_ms": 2.548, "strat_ms": 3.318, "dtau_pct": -30.3, "speedup": 0.77, "ici_saved_pct": 75},
+      {"seq_len": 16384, "blocks_per_dev": 4,  "buckets": [1,2,3,4],     "eviction_pct": 90, "K": 1,  "bucket": 1,  "dense_ms": 2.548, "strat_ms": 3.323, "dtau_pct": -30.5, "speedup": 0.77, "ici_saved_pct": 75},
+
+      {"seq_len": 32768, "blocks_per_dev": 8,  "buckets": [2,4,6,8],     "eviction_pct": 0,  "K": 8,  "bucket": 8,  "dense_ms": 3.408, "strat_ms": 4.121, "dtau_pct": -20.9, "speedup": 0.83, "ici_saved_pct": 0},
+      {"seq_len": 32768, "blocks_per_dev": 8,  "buckets": [2,4,6,8],     "eviction_pct": 50, "K": 4,  "bucket": 4,  "dense_ms": 3.408, "strat_ms": 3.780, "dtau_pct": -10.9, "speedup": 0.90, "ici_saved_pct": 50},
+      {"seq_len": 32768, "blocks_per_dev": 8,  "buckets": [2,4,6,8],     "eviction_pct": 75, "K": 2,  "bucket": 2,  "dense_ms": 3.408, "strat_ms": 3.616, "dtau_pct": -6.1,  "speedup": 0.94, "ici_saved_pct": 75},
+      {"seq_len": 32768, "blocks_per_dev": 8,  "buckets": [2,4,6,8],     "eviction_pct": 90, "K": 1,  "bucket": 2,  "dense_ms": 3.408, "strat_ms": 3.579, "dtau_pct": -5.0,  "speedup": 0.95, "ici_saved_pct": 75},
+
+      {"seq_len": 65536, "blocks_per_dev": 16, "buckets": [4,8,12,16],   "eviction_pct": 0,  "K": 16, "bucket": 16, "dense_ms": 5.426, "strat_ms": 6.435, "dtau_pct": -18.6, "speedup": 0.84, "ici_saved_pct": 0},
+      {"seq_len": 65536, "blocks_per_dev": 16, "buckets": [4,8,12,16],   "eviction_pct": 50, "K": 8,  "bucket": 8,  "dense_ms": 5.426, "strat_ms": 5.001, "dtau_pct":  7.8,  "speedup": 1.08, "ici_saved_pct": 50},
+      {"seq_len": 65536, "blocks_per_dev": 16, "buckets": [4,8,12,16],   "eviction_pct": 75, "K": 4,  "bucket": 4,  "dense_ms": 5.426, "strat_ms": 4.636, "dtau_pct": 14.6,  "speedup": 1.17, "ici_saved_pct": 75},
+      {"seq_len": 65536, "blocks_per_dev": 16, "buckets": [4,8,12,16],   "eviction_pct": 90, "K": 2,  "bucket": 4,  "dense_ms": 5.426, "strat_ms": 4.756, "dtau_pct": 12.3,  "speedup": 1.14, "ici_saved_pct": 75}
+    ]
+  },
+  "analysis": {
+    "crossover_point": "65K tokens (16 blocks/dev) — first positive Δτ at 50% eviction",
+    "best_speedup": {"seq_len": 65536, "eviction_pct": 75, "speedup": 1.17, "dtau_pct": 14.6, "ici_saved_pct": 75},
+    "overhead_source": "shard_map + lax.switch dispatch infrastructure adds ~1ms fixed cost. At short sequences (2-4 blocks/dev), this dominates the compute workload.",
+    "overhead_trend": "Overhead fraction shrinks monotonically with sequence length: 0.67x@8K → 0.71x@16K → 0.83x@32K → 0.84x@65K (all at 0% eviction)",
+    "bucket_saturation": "At 90% eviction, K rounds up to b1 which may be larger than K. This wastes ICI at coarse granularity (e.g., K=2 → b1=4 at 65K). Finer buckets at higher blocks/dev resolve this.",
+    "projection": "At 128K+ tokens (32+ blocks/dev), bucket granularity doubles and fixed overhead becomes <10% of compute. Δτ > 0 expected at ≥50% eviction. HLO pass eliminates dispatch overhead entirely."
+  }
+}

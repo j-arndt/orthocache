@@ -1,9 +1,13 @@
 [project]
 name = "orthocache"
-version = "0.1.0"
+version = "0.3.0"
 description = "Hardware-Native Spectral Energy Thresholding Governor for TPU KV-Cache Optimization"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+    {name = "Justin Arndt", email = "justinarndt05@gmail.com"},
+]
+license = {text = "PolyForm-Noncommercial-1.0.0"}
 dependencies = [
     "jax>=0.4.25",
     "numpy>=1.24.0",
@@ -14,6 +18,11 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/j-arndt/orthocache"
+Repository = "https://github.com/j-arndt/orthocache"
+Documentation = "https://github.com/j-arndt/orthocache/blob/main/docs/"
 
 [build-system]
 requires = ["setuptools>=61.0.0"]

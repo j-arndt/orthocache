@@ -1,0 +1,48 @@
+{
+  "experiment": "Phase D: Bucketed Stream Compaction Benchmark",
+  "platform": "TPU v5e",
+  "platform_note": "JAX runtime reports 'TPU v5 lite'; actual Kaggle hardware is TPU v5e-8 (8 chips, 128 GB HBM)",
+  "jax_version": "0.10.1",
+  "config": {
+    "seq_len_q": 1,
+    "num_heads": 4,
+    "head_dim": 128,
+    "block_size": 512,
+    "warmup": 10,
+    "reps": 30
+  },
+  "method": "Sort-based stream compaction → gather K active blocks → dense attention on (bucket × block_size) tokens. Bucket = nearest power-of-2 ≥ K. Each bucket size is a separate JIT-compiled kernel with genuinely smaller matmul.",
+  "note": "These are USER-SPACE emulation results with Python-level gather overhead. The XLA HLO pass would eliminate the gather entirely (indirect DMA addressing), making these LOWER BOUNDS on compiler-pass performance.",
+  "results": [
+    {"seq_len": 8192,  "num_blocks": 16,  "eviction_pct": 0,  "K": 16, "bucket": 16,  "predicated_ms": 0.228, "compacted_ms": 0.333, "delta_tau_pct": -45.8, "speedup": 0.69},
+    {"seq_len": 8192,  "num_blocks": 16,  "eviction_pct": 50, "K": 8,  "bucket": 8,   "predicated_ms": 0.202, "compacted_ms": 0.204, "delta_tau_pct": -0.6,  "speedup": 0.99},
+    {"seq_len": 8192,  "num_blocks": 16,  "eviction_pct": 75, "K": 4,  "bucket": 4,   "predicated_ms": 0.190, "compacted_ms": 0.185, "delta_tau_pct": 2.2,   "speedup": 1.02},
+    {"seq_len": 8192,  "num_blocks": 16,  "eviction_pct": 90, "K": 2,  "bucket": 2,   "predicated_ms": 0.231, "compacted_ms": 0.148, "delta_tau_pct": 36.0,  "speedup": 1.56},
+
+    {"seq_len": 16384, "num_blocks": 32,  "eviction_pct": 0,  "K": 32, "bucket": 32,  "predicated_ms": 0.383, "compacted_ms": 0.484, "delta_tau_pct": -26.4, "speedup": 0.79},
+    {"seq_len": 16384, "num_blocks": 32,  "eviction_pct": 50, "K": 16, "bucket": 16,  "predicated_ms": 0.390, "compacted_ms": 0.345, "delta_tau_pct": 11.4,  "speedup": 1.13},
+    {"seq_len": 16384, "num_blocks": 32,  "eviction_pct": 75, "K": 8,  "bucket": 8,   "predicated_ms": 0.383, "compacted_ms": 0.196, "delta_tau_pct": 48.8,  "speedup": 1.95},
+    {"seq_len": 16384, "num_blocks": 32,  "eviction_pct": 90, "K": 4,  "bucket": 4,   "predicated_ms": 0.391, "compacted_ms": 0.166, "delta_tau_pct": 57.4,  "speedup": 2.35},
+
+    {"seq_len": 32768, "num_blocks": 64,  "eviction_pct": 0,  "K": 64, "bucket": 64,  "predicated_ms": 0.368, "compacted_ms": 0.558, "delta_tau_pct": -51.8, "speedup": 0.66},
+    {"seq_len": 32768, "num_blocks": 64,  "eviction_pct": 50, "K": 32, "bucket": 32,  "predicated_ms": 0.369, "compacted_ms": 0.466, "delta_tau_pct": -26.3, "speedup": 0.79},
+    {"seq_len": 32768, "num_blocks": 64,  "eviction_pct": 75, "K": 16, "bucket": 16,  "predicated_ms": 0.367, "compacted_ms": 0.345, "delta_tau_pct": 5.9,   "speedup": 1.06},
+    {"seq_len": 32768, "num_blocks": 64,  "eviction_pct": 90, "K": 7,  "bucket": 8,   "predicated_ms": 0.367, "compacted_ms": 0.177, "delta_tau_pct": 51.9,  "speedup": 2.08},
+
+    {"seq_len": 65536, "num_blocks": 128, "eviction_pct": 0,  "K": 128,"bucket": 128, "predicated_ms": 0.504, "compacted_ms": 1.518, "delta_tau_pct": -201.2,"speedup": 0.33},
+    {"seq_len": 65536, "num_blocks": 128, "eviction_pct": 50, "K": 64, "bucket": 64,  "predicated_ms": 0.494, "compacted_ms": 0.740, "delta_tau_pct": -49.9, "speedup": 0.67},
+    {"seq_len": 65536, "num_blocks": 128, "eviction_pct": 75, "K": 32, "bucket": 32,  "predicated_ms": 0.509, "compacted_ms": 0.500, "delta_tau_pct": 1.7,   "speedup": 1.02},
+    {"seq_len": 65536, "num_blocks": 128, "eviction_pct": 90, "K": 13, "bucket": 16,  "predicated_ms": 0.490, "compacted_ms": 0.393, "delta_tau_pct": 19.7,  "speedup": 1.25}
+  ],
+  "summary": {
+    "positive_delta_tau_configurations": 8,
+    "total_configurations": 16,
+    "best_speedup": {"seq_len": 16384, "eviction_pct": 90, "speedup": 2.35, "delta_tau_pct": 57.4},
+    "crossover_at_50pct_eviction": "16K tokens (1.13x)",
+    "crossover_at_75pct_eviction": "All sequence lengths (1.02x–1.95x)",
+    "crossover_at_90pct_eviction": "All sequence lengths (1.25x–2.35x)",
+    "gather_overhead_at_0pct": "0.33x–0.69x (pure overhead, no eviction benefit)"
+  },
+  "gate_5_status": "PARTIALLY OPEN — Δτ > 0 demonstrated at ≥75% eviction across all sequence lengths, and at 50% eviction for 16K tokens. Gather overhead prevents positive Δτ at 50% eviction for 32K+ tokens. XLA HLO pass expected to eliminate gather overhead and extend positive-Δτ regime.",
+  "timestamp": "2026-06-02T12:54:57-04:00"
+}

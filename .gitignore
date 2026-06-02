@@ -74,6 +74,9 @@ build_v4_notebook.py
 # Deep research (internal working docs)
 /deepresearch/
 
+# Archive directory (moved clutter)
+/02June2026/
+
 # LaTeX build artifacts
 paper/*.aux
 paper/*.log
