@@ -7,7 +7,7 @@
     <a href="https://www.python.org/downloads/"><img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white" /></a>
     <a href="https://github.com/google/jax"><img alt="JAX" src="https://img.shields.io/badge/JAX-%E2%89%A50.4.25-9cf?logo=google&logoColor=white" /></a>
     <a href="https://leanprover.github.io/"><img alt="Lean 4 Type-Checked" src="https://img.shields.io/badge/Lean_4-Type--Checked-brightgreen?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHRleHQgeD0iMCIgeT0iMTQiIGZvbnQtc2l6ZT0iMTQiPuKckyA8L3RleHQ+PC9zdmc+" /></a>
-    <a href="LICENSE"><img alt="License: PolyForm Noncommercial" src="https://img.shields.io/badge/license-PolyForm%20NC%201.0-blue.svg" /></a>
+    <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" /></a>
     <a href="https://doi.org/10.5281/zenodo.20518370"><img alt="DOI" src="https://zenodo.org/badge/DOI/10.5281/zenodo.20518370.svg" /></a>
   </p>
 </p>
@@ -318,11 +318,11 @@ If you use OrthoCache in your research, please cite:
 
 ## License
 
-This project is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+This project is licensed under the **[GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE)**.
 
-You are free to use, study, modify, and redistribute OrthoCache for **any non-commercial purpose** — including academic research, personal experimentation, benchmarking, and evaluation.
+You are free to use, study, modify, and redistribute OrthoCache under the AGPL-3.0 terms. If you deploy OrthoCache as part of a networked service, you must make your complete source code available under the same license.
 
-**Commercial use** (deployment in production systems, integration into commercial products or services) requires a separate commercial license.
+**Commercial licensing** — for proprietary use without AGPL copyleft obligations — is available separately.
 
 📧 **Commercial licensing inquiries:** [justinarndt05@gmail.com](mailto:justinarndt05@gmail.com)
 
