@@ -110,6 +110,12 @@ OrthoCache's throughput improvement has been **progressively de-risked** across 
 
 > **Crossover:** Δτ > 0 at 65K tokens with ≥50% eviction. `shard_map` + `lax.switch` Stratified Communication Bucketing physically truncates ICI transfer volume before the collective. Max error: **0.000000** across all eviction rates.
 
+<p align="center">
+  <img src="docs/stratified_communication_bucketing.png" alt="Stratified Communication Bucketing Architecture" width="800" />
+  <br/>
+  <sub><b>Figure 1.</b> Stratified Communication Bucketing on TPU. Local shards undergo scalar consensus (<code>lax.pmax</code>) to determine the global active block ceiling, then route through a 4-branch <code>lax.switch</code> tree (25%/50%/75%/100% payload density) before executing a truncated <code>AllGather</code> collective over ICI.</sub>
+</p>
+
 ───────────────────────────────────────────────────────────────────────
 
 ## Quick Start
