@@ -87,3 +87,7 @@ paper/*.fls
 paper/*.fdb_latexmk
 paper/*.synctex.gz
 paper/*.toc
+
+# GPU repo (separate repository)
+03June2026/
+02June2026/
